@@ -1,0 +1,24 @@
+# Rust
+src-tauri/target/
+
+# Node
+node_modules/
+
+# Penpot build artifacts
+penpot-repo/
+src/penpot/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Clojure tooling
+.clj-kondo/
+.lsp/
+
+.claude/

@@ -1,0 +1,15 @@
+{
+  "name": "penpot-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "build-frontend": "bash scripts/build-frontend.sh",
+    "setup": "bun install && echo 'Next step: bun run build-frontend'"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Penpot Desktop – Settings</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700&display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg: #0e0e11;
+        --surface: #16161b;
+        --surface2: #1e1e25;
+        --border: #2a2a35;
+        --text: #e0e0ec;
+        --text-dim: #7a7a8e;
+        --accent: #31efb8;
+        --accent-dim: rgba(49, 239, 184, 0.08);
+        --danger: #ef4444;
+      }
+
+      body {
+        font-family: "Work Sans", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(
+            ellipse 600px 400px at 20% 50%,
+            rgba(49, 239, 184, 0.04),
+            transparent
+          ),
+          radial-gradient(
+            ellipse 500px 500px at 80% 30%,
+            rgba(100, 80, 255, 0.03),
+            transparent
+          );
+        pointer-events: none;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 520px;
+        padding: 20px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .logo-area {
+        text-align: center;
+        margin-bottom: 36px;
+      }
+
+      .logo-icon {
+        width: 128px;
+        height: 128px;
+        margin: 0 auto 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .logo-icon .logo {
+        width: 128px;
+        height: 128px;
+        display: block;
+      }
+
+      h1 {
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.5px;
+        margin-bottom: 4px;
+      }
+      .subtitle {
+        color: var(--text-dim);
+        font-size: 13px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 14px;
+      }
+
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      input[type="text"] {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 11px 14px;
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      input[type="text"]:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+      input::placeholder {
+        color: #3a3a48;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 11px 22px;
+        border-radius: 8px;
+        font-family: "Work Sans", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        transition: all 0.2s;
+        white-space: nowrap;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #0e0e11;
+      }
+      .btn-primary:hover {
+        background: #45f5c5;
+        box-shadow: 0 4px 20px rgba(49, 239, 184, 0.2);
+        transform: translateY(-1px);
+      }
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+
+      .presets {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .chip {
+        font-size: 11px;
+        padding: 5px 12px;
+        border-radius: 20px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .chip:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-dim);
+      }
+
+      .recent-section h3 {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 10px;
+      }
+      .recent-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .recent-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border-radius: 7px;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .recent-item:hover {
+        background: var(--surface2);
+      }
+      .recent-item .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.5;
+        flex-shrink: 0;
+      }
+      .recent-item .url {
+        flex: 1;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .recent-item .rm {
+        opacity: 0;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        padding: 3px;
+        border-radius: 4px;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .recent-item:hover .rm {
+        opacity: 1;
+      }
+      .recent-item .rm:hover {
+        color: var(--danger);
+        background: rgba(239, 68, 68, 0.1);
+      }
+
+      .status {
+        text-align: center;
+        padding: 10px;
+        font-size: 12px;
+        display: none;
+        border-radius: 8px;
+        margin-top: 12px;
+      }
+      .status.error {
+        color: var(--danger);
+        display: block;
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .status.loading {
+        color: var(--accent);
+        display: block;
+      }
+      .status.success {
+        color: var(--accent);
+        display: block;
+        background: var(--accent-dim);
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--accent-dim);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+
+      .footer {
+        text-align: center;
+        margin-top: 20px;
+        font-size: 11px;
+        color: #fff;
+      }
+      .footer a {
+        color: var(--text-dim);
+        text-decoration: none;
+      }
+      .footer a:hover {
+        color: var(--accent);
+      }
+
+      .info-box {
+        background: var(--accent-dim);
+        border: 1px solid rgba(49, 239, 184, 0.15);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-top: 16px;
+        font-size: 12px;
+        color: var(--text-dim);
+        line-height: 1.5;
+      }
+      .info-box strong {
+        color: var(--accent);
+      }
+
+      .toggle-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .toggle-option {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        transition: all 0.15s;
+      }
+      .toggle-option:hover {
+        border-color: var(--accent);
+        background: var(--accent-dim);
+      }
+      .toggle-option.active {
+        border-color: var(--accent);
+        background: var(--accent-dim);
+      }
+      .toggle-option strong {
+        font-size: 13px;
+        display: block;
+      }
+      .toggle-option .toggle-desc {
+        font-size: 11px;
+        color: var(--text-dim);
+      }
+      .toggle-radio {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        flex-shrink: 0;
+        transition: all 0.15s;
+        position: relative;
+      }
+      .toggle-option.active .toggle-radio {
+        border-color: var(--accent);
+        background: var(--accent);
+        box-shadow: inset 0 0 0 3px var(--surface);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <img class="logo" src="/__penpot_desktop/app-icon.png" alt="Penpot Desktop" />
+        </div>
+        <h1 data-i18n="s.title">Penpot Desktop</h1>
+        <p class="subtitle" data-i18n="s.subtitle">
+          Local Penpot frontend · Configurable backend
+        </p>
+      </div>
+
+      <div class="card">
+        <label data-i18n="s.backend-url">Penpot Backend URL</label>
+        <div class="input-row">
+          <input
+            type="text"
+            id="urlInput"
+            placeholder="https://design.penpot.app"
+            spellcheck="false"
+          />
+          <button
+            class="btn btn-primary"
+            id="connectBtn"
+            onclick="connect()"
+            data-i18n="s.connect"
+          >
+            Connect
+          </button>
+        </div>
+        <div class="presets">
+          <span class="chip" onclick="setUrl('https://design.penpot.app')"
+            ><span data-i18n="s.cloud">Penpot Cloud</span></span
+          >
+          <span class="chip" onclick="setUrl('http://localhost:9001')"
+            ><span data-i18n="s.local">Local</span> :9001</span
+          >
+          <span class="chip" onclick="setUrl('http://localhost:3449')"
+            ><span data-i18n="s.dev">Dev</span> :3449</span
+          >
+        </div>
+        <div id="status" class="status"></div>
+
+        <div class="info-box">
+          <strong data-i18n="s.how-title">How it works:</strong>
+          <span data-i18n="s.how-desc"
+            >The Penpot frontend runs locally in this app. API requests are
+            automatically forwarded to your backend (reverse proxy). No CORS
+            issues, full functionality.</span
+          >
+        </div>
+      </div>
+
+      <div class="card">
+        <label data-i18n="s.renderer">Renderer</label>
+        <div class="toggle-row">
+          <div
+            class="toggle-option"
+            id="opt-wasm"
+            onclick="setRenderer('wasm')"
+          >
+            <span class="toggle-radio"></span>
+            <div>
+              <strong data-i18n="s.wasm-gpu">WASM (GPU)</strong>
+              <span class="toggle-desc" data-i18n="s.wasm-desc"
+                >New Skia-based renderer. Faster, requires WebGL2.</span
+              >
+            </div>
+          </div>
+          <div
+            class="toggle-option"
+            id="opt-classic"
+            onclick="setRenderer('classic')"
+          >
+            <span class="toggle-radio"></span>
+            <div>
+              <strong data-i18n="s.classic">Classic (SVG)</strong>
+              <span class="toggle-desc" data-i18n="s.classic-desc"
+                >Classic SVG/Canvas renderer. Broader compatibility.</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label id="lbl-language" data-i18n="s.language">Language</label>
+        <select
+          id="langSelect"
+          onchange="setLanguage(this.value)"
+          style="
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 11px 14px;
+            color: var(--text);
+            font-family: &quot;Work Sans&quot;, sans-serif;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            background-image: url(&quot;data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 12 12%22><path fill=%22%237a7a8e%22 d=%22M2 4l4 4 4-4%22/></svg>&quot;);
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+          "
+        ></select>
+      </div>
+
+      <div class="card" id="recentCard" style="display: none">
+        <div class="recent-section">
+          <h3 data-i18n="s.recent">Recent Connections</h3>
+          <div class="recent-list" id="recentList"></div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Penpot Desktop v1.0 ·
+        <a href="https://penpot.app" target="_blank">Penpot</a> {{PENPOT_VERSION}} +
+        <a href="https://tauri.app" target="_blank">Tauri</a>
+      </div>
+    </div>
+
+    <script>
+      const urlInput = document.getElementById("urlInput");
+      const statusEl = document.getElementById("status");
+      const recentCard = document.getElementById("recentCard");
+      const recentList = document.getElementById("recentList");
+      let currentRenderer = "wasm";
+      let currentLang = "en";
+
+      // Available languages
+      const LANGUAGES = {
+        en: "English",
+        de: "Deutsch",
+        es: "Espa\u00f1ol",
+        fr: "Fran\u00e7ais",
+        pt_BR: "Portugu\u00eas (BR)",
+        it: "Italiano",
+        tr: "T\u00fcrk\u00e7e",
+        ru: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+        zh_CN: "\u4e2d\u6587",
+        jpn_JP: "\u65e5\u672c\u8a9e",
+        ko: "\ud55c\uad6d\uc5b4",
+        ar: "\u0627\u0644\u0639\u0631\u0628\u064a\u0629",
+        ca: "Catal\u00e0",
+        nl: "Nederlands",
+        pl: "Polski",
+        ro: "Rom\u00e2n\u0103",
+        ukr_UA: "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
+        he: "\u05e2\u05d1\u05e8\u05d9\u05ea",
+      };
+
+      function populateLanguages() {
+        const sel = document.getElementById("langSelect");
+        sel.innerHTML = "";
+        for (const [code, name] of Object.entries(LANGUAGES)) {
+          const opt = document.createElement("option");
+          opt.value = code;
+          opt.textContent = name;
+          if (code === currentLang) opt.selected = true;
+          sel.appendChild(opt);
+        }
+      }
+
+      var _translations = {};
+
+      async function applyTranslations() {
+        try {
+          const resp = await fetch("/__penpot_desktop/translations");
+          _translations = await resp.json();
+          document.querySelectorAll("[data-i18n]").forEach(function (el) {
+            var key = el.getAttribute("data-i18n");
+            if (_translations[key]) el.textContent = _translations[key];
+          });
+          document.title = _translations["s.title"] || "Penpot Desktop";
+        } catch (e) {}
+      }
+
+      function setLanguage(lang) {
+        currentLang = lang;
+        fetch("/__penpot_desktop/set-language", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language: lang }),
+        })
+          .then(function () {
+            applyTranslations();
+          })
+          .catch(function () {});
+      }
+
+      function setRenderer(r) {
+        currentRenderer = r;
+        document
+          .getElementById("opt-wasm")
+          .classList.toggle("active", r === "wasm");
+        document
+          .getElementById("opt-classic")
+          .classList.toggle("active", r !== "wasm");
+      }
+
+      async function init() {
+        try {
+          const resp = await fetch("/__penpot_desktop/config");
+          const config = await resp.json();
+          if (config.backend_url) urlInput.value = config.backend_url;
+          currentLang = config.language || "en";
+          populateLanguages();
+          setRenderer(config.renderer || "wasm");
+          renderRecent(config.recent_urls || []);
+          await applyTranslations();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      function renderRecent(urls) {
+        if (!urls.length) {
+          recentCard.style.display = "none";
+          return;
+        }
+        recentCard.style.display = "block";
+        recentList.innerHTML = urls
+          .map(
+            (u) => `
+      <div class="recent-item" onclick="connectTo('${u}')">
+        <span class="dot"></span>
+        <span class="url">${u}</span>
+      </div>
+    `,
+          )
+          .join("");
+      }
+
+      function setUrl(u) {
+        urlInput.value = u;
+        urlInput.focus();
+      }
+
+      function showStatus(msg, type) {
+        statusEl.className = "status " + type;
+        statusEl.innerHTML = msg;
+      }
+
+      async function connect() {
+        let url = urlInput.value.trim();
+        if (!url) {
+          showStatus(
+            _translations["s.enter-url"] || "Please enter a URL.",
+            "error",
+          );
+          return;
+        }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+          url = "https://" + url;
+          urlInput.value = url;
+        }
+        url = url.replace(/\/+$/, "");
+
+        showStatus(
+          '<span class="spinner"></span> ' +
+            (_translations["s.connecting"] || "Connecting\u2026"),
+          "loading",
+        );
+
+        try {
+          const resp = await fetch("/__penpot_desktop/set-backend", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url, renderer: currentRenderer }),
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            showStatus(
+              _translations["s.connected"] ||
+                "\u2713 Connected! Loading Penpot\u2026",
+              "success",
+            );
+            const wasmParam = currentRenderer === "wasm" ? "true" : "false";
+            setTimeout(() => {
+              window.location.href = "/#/?wasm=" + wasmParam;
+            }, 600);
+          } else {
+            showStatus(
+              (_translations["s.error"] || "Error") +
+                ": " +
+                (result.error || "Unknown"),
+              "error",
+            );
+          }
+        } catch (e) {
+          showStatus(
+            (_translations["s.conn-failed"] || "Connection failed") +
+              ": " +
+              e.message,
+            "error",
+          );
+        }
+      }
+
+      function connectTo(u) {
+        urlInput.value = u;
+        connect();
+      }
+
+      urlInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") connect();
+      });
+      document.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "l") {
+          e.preventDefault();
+          urlInput.focus();
+          urlInput.select();
+        }
+      });
+
+      init();
+    </script>
+  </body>
+</html>
