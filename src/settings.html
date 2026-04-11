@@ -358,6 +358,20 @@
         background: var(--accent);
         box-shadow: inset 0 0 0 3px var(--surface);
       }
+      .experimental-badge {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #f59e0b;
+        background: rgba(245, 158, 11, 0.12);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        border-radius: 4px;
+        vertical-align: middle;
+      }
     </style>
   </head>
   <body>
@@ -418,19 +432,6 @@
         <div class="toggle-row">
           <div
             class="toggle-option"
-            id="opt-wasm"
-            onclick="setRenderer('wasm')"
-          >
-            <span class="toggle-radio"></span>
-            <div>
-              <strong data-i18n="s.wasm-gpu">WASM (GPU)</strong>
-              <span class="toggle-desc" data-i18n="s.wasm-desc"
-                >New Skia-based renderer. Faster, requires WebGL2.</span
-              >
-            </div>
-          </div>
-          <div
-            class="toggle-option"
             id="opt-classic"
             onclick="setRenderer('classic')"
           >
@@ -439,6 +440,22 @@
               <strong data-i18n="s.classic">Classic (SVG)</strong>
               <span class="toggle-desc" data-i18n="s.classic-desc"
                 >Classic SVG/Canvas renderer. Broader compatibility.</span
+              >
+            </div>
+          </div>
+          <div
+            class="toggle-option"
+            id="opt-wasm"
+            onclick="setRenderer('wasm')"
+          >
+            <span class="toggle-radio"></span>
+            <div>
+              <strong>
+                <span data-i18n="s.wasm-gpu">WASM (GPU)</span>
+                <span class="experimental-badge">Experimental</span>
+              </strong>
+              <span class="toggle-desc" data-i18n="s.wasm-desc"
+                >New Skia-based renderer. Faster, requires WebGL2.</span
               >
             </div>
           </div>
@@ -488,7 +505,7 @@
       const statusEl = document.getElementById("status");
       const recentCard = document.getElementById("recentCard");
       const recentList = document.getElementById("recentList");
-      let currentRenderer = "wasm";
+      let currentRenderer = "classic";
       let currentLang = "en";
 
       // Available languages
@@ -569,7 +586,7 @@
           if (config.backend_url) urlInput.value = config.backend_url;
           currentLang = config.language || "en";
           populateLanguages();
-          setRenderer(config.renderer || "wasm");
+          setRenderer(config.renderer || "classic");
           renderRecent(config.recent_urls || []);
           await applyTranslations();
         } catch (e) {

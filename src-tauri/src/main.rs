@@ -60,12 +60,20 @@ struct AppConfig {
     renderer: String,
     #[serde(default = "default_language")]
     language: String,
+    /// Legacy field — plain URL list from older configs. Migrated to
+    /// `open_groups` on load.
     #[serde(default)]
     open_tabs: Vec<String>,
+    /// Each inner Vec is one window-group (= one macOS tab bar).
+    /// The first group is restored into the main window; additional
+    /// groups each become a standalone top-level window with their
+    /// own tabs.
+    #[serde(default)]
+    open_groups: Vec<Vec<String>>,
 }
 
 fn default_renderer() -> String {
-    "wasm".into()
+    "classic".into()
 }
 fn default_language() -> String {
     "en".into()
@@ -98,8 +106,196 @@ fn desktop_to_penpot_locale(desktop: &str) -> Option<&'static str> {
 
 /// Static portion of the `/__penpot_desktop_config.js` script.
 /// The dynamic locale override is prepended at request time.
+/// Minimal shim injected into HTML responses served by /__penpot_desktop/cors-proxy.
+/// Reroutes cross-origin fetch() and iframe.src through the parent's cors-proxy
+/// so plugin UIs can transitively load their own assets without hitting CORS.
+const IFRAME_SHIM_JS: &str = r#"(function(){
+  var _f = window.fetch.bind(window);
+  function proxify(u){
+    try {
+      var abs = new URL(u, document.baseURI);
+      if (abs.origin !== location.origin && /^https?:$/.test(abs.protocol)) {
+        return location.origin + '/__penpot_desktop/cors-proxy?url=' + encodeURIComponent(abs.href);
+      }
+    } catch(e) {}
+    return u;
+  }
+  // Resolve a URL the way <a href> would, for the open-tab handoff.
+  function resolveAbs(u){
+    try { return new URL(u, document.baseURI).href; } catch(e) { return u; }
+  }
+  function openExternal(u){
+    var abs = resolveAbs(u);
+    if (!/^https?:/i.test(abs)) return false;
+    try {
+      _f(location.origin + '/__penpot_desktop/open-tab', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: abs})
+      }).catch(function(){});
+    } catch(e) {}
+    return true;
+  }
+  window.fetch = function(input, init){
+    try {
+      var url = typeof input === 'string' ? input : (input && input.url);
+      if (url) {
+        var p = proxify(url);
+        if (p !== url) {
+          input = typeof input === 'string' ? p : new Request(p, input);
+        }
+      }
+    } catch(e) {}
+    return _f(input, init);
+  };
+  // Patch HTMLIFrameElement.src setter so nested iframes also route through proxy
+  try {
+    var d = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+    if (d && d.set) {
+      Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+        configurable: true,
+        enumerable: d.enumerable,
+        get: d.get,
+        set: function(v){ d.set.call(this, proxify(v)); }
+      });
+    }
+  } catch(e) {}
+  // Plugin-side window.open: forward to the parent's open-tab handler so that
+  // external URLs land in the system browser instead of a blocked WebView nav.
+  window.open = function(url){
+    if (url) openExternal(url);
+    return null;
+  };
+  // <a target="_blank"> clicks bypass window.open — intercept them too.
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    while (t && t.nodeType === 1 && t.tagName !== 'A') t = t.parentNode;
+    if (!t || t.tagName !== 'A') return;
+    var href = t.getAttribute('href');
+    var target = t.getAttribute('target');
+    if (!href) return;
+    var abs = resolveAbs(href);
+    var isExternal = false;
+    try {
+      var u = new URL(abs);
+      isExternal = /^https?:$/.test(u.protocol) && u.origin !== location.origin;
+    } catch(e) {}
+    // Always intercept _blank/_new/_top, regardless of origin — those mean
+    // "open elsewhere" and would otherwise spawn an empty popup window.
+    if (target === '_blank' || target === '_new' || target === '_top') {
+      e.preventDefault();
+      e.stopPropagation();
+      openExternal(abs);
+    }
+  }, true);
+})();"#;
+
 const DESKTOP_CONFIG_JS: &str = r#"// Penpot Desktop runtime config
 (function() {
+  // Cross-origin bypass — route 3rd-party fetches AND iframe srcs through warp
+  // so plugins (and any other code that talks to non-127.0.0.1 hosts) work
+  // despite browser CORS / X-Frame-Options. Same-origin and relative URLs pass
+  // through untouched.
+  function __penpotProxify(u) {
+    try {
+      var abs = new URL(u, location.href);
+      if (abs.origin !== location.origin && /^https?:$/.test(abs.protocol)) {
+        return '/__penpot_desktop/cors-proxy?url=' + encodeURIComponent(abs.href);
+      }
+    } catch(e) {}
+    return u;
+  }
+  var _origFetch = window.fetch.bind(window);
+  window.fetch = function(input, init) {
+    try {
+      var url = typeof input === 'string' ? input : (input && input.url);
+      if (url) {
+        var p = __penpotProxify(url);
+        if (p !== url) {
+          input = typeof input === 'string' ? p : new Request(p, input);
+        }
+      }
+    } catch(e) {}
+    return _origFetch(input, init);
+  };
+  // Inject our click/window.open handlers directly into a same-origin iframe
+  // document. Called on every iframe 'load' event. Because the iframe is loaded
+  // through cors-proxy on the same origin as the parent, contentDocument is
+  // accessible — no HTML rewriting required.
+  function __penpotInjectIntoIframe(iframe) {
+    try {
+      var doc = iframe.contentDocument;
+      var win = iframe.contentWindow;
+      if (!doc || !win) return;
+      if (doc.__penpotInjected) return;
+      doc.__penpotInjected = true;
+      // Patch the iframe's window.open → forward to open-tab
+      win.open = function(url) {
+        if (url) {
+          var abs;
+          try { abs = new win.URL(url, doc.baseURI).href; } catch(e) { abs = url; }
+          fetch('/__penpot_desktop/open-tab', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: abs})
+          }).catch(function(){});
+        }
+        return null;
+      };
+      // Capture-phase click handler for <a target="_blank"> (dynamic-friendly)
+      doc.addEventListener('click', function(e) {
+        var t = e.target;
+        while (t && t.nodeType === 1 && t.tagName !== 'A') t = t.parentNode;
+        if (!t || t.tagName !== 'A') return;
+        var href = t.getAttribute('href');
+        var target = t.getAttribute('target');
+        if (!href) return;
+        if (target === '_blank' || target === '_new' || target === '_top') {
+          e.preventDefault();
+          e.stopPropagation();
+          var abs;
+          try { abs = new win.URL(href, doc.baseURI).href; } catch(e2) { abs = href; }
+          fetch('/__penpot_desktop/open-tab', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: abs})
+          }).catch(function(){});
+        }
+      }, true);
+    } catch(e) {}
+  }
+
+  // Patch HTMLIFrameElement.src setter — Penpot's plugin runtime sets
+  // iframe.src directly (in shadow DOM), bypassing setAttribute hooks. The
+  // property setter is the only reliable interception point. We also attach
+  // a load listener so we can inject handlers into the iframe document once
+  // it's ready (more reliable than HTML injection for SPA contents).
+  try {
+    var __ifd = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+    if (__ifd && __ifd.set) {
+      Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+        configurable: true,
+        enumerable: __ifd.enumerable,
+        get: __ifd.get,
+        set: function(v) {
+          var p = __penpotProxify(v);
+          var self = this;
+          // Inject handlers once the iframe document is ready. Re-run a few
+          // times because SPAs may rewrite the document after initial load.
+          self.addEventListener('load', function() {
+            __penpotInjectIntoIframe(self);
+            var tries = 0;
+            var iv = setInterval(function() {
+              if (++tries > 10) { clearInterval(iv); return; }
+              __penpotInjectIntoIframe(self);
+            }, 500);
+          });
+          __ifd.set.call(this, p);
+        }
+      });
+    }
+  } catch(e) {}
+
   // Fix Cmd+C/X/V/A — WKWebView without PredefinedMenuItems doesn't handle
   // clipboard/selectAll natively. This capture-phase listener handles both
   // input fields (direct DOM manipulation) and canvas (synthetic ClipboardEvent).
@@ -298,7 +494,15 @@ const DESKTOP_CONFIG_JS: &str = r#"// Penpot Desktop runtime config
     // Events bubble up to document where Mousetrap catches them
     var el = document.getElementById('app') || document.body;
     el.dispatchEvent(makeEvent('keydown'));
-    el.dispatchEvent(makeEvent('keypress'));
+    // Only dispatch keypress when no modifier is held. Mousetrap uses keypress
+    // for plain single-character bindings (like '+', '-', '2'), so dispatching
+    // a keypress with which=charCode while shift is held would also trigger the
+    // plain-character binding (e.g. shift+2 → opacity 20% on top of zoom-fit).
+    // A real shift+2 keypress would carry '@' or '"' depending on layout, never '2'.
+    var hasModifier = opts.shiftKey || opts.ctrlKey || opts.altKey || opts.metaKey;
+    if (!hasModifier) {
+      el.dispatchEvent(makeEvent('keypress'));
+    }
     el.dispatchEvent(makeEvent('keyup'));
   };
   // Desktop selection bridge — Penpot calls this when selection changes
@@ -326,12 +530,33 @@ const DESKTOP_CONFIG_JS: &str = r#"// Penpot Desktop runtime config
       fetch('/__penpot_desktop/set-view', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mode: mode})
+        body: JSON.stringify({mode: mode, label: window.__penpotWindowLabel || ''})
       }).catch(function(){});
     }
   }
   window.addEventListener('hashchange', updateView);
   window.addEventListener('popstate', updateView);
+
+  // Notify backend whenever this window/tab gains focus, so the native menu
+  // can be swapped to match. macOS native tabs don't reliably surface
+  // window-focused events through Tauri, so we drive it from JS instead.
+  function notifyFocused() {
+    var label = window.__penpotWindowLabel;
+    if (!label) return;
+    fetch('/__penpot_desktop/window-focused', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({label: label})
+    }).catch(function(){});
+  }
+  window.addEventListener('focus', notifyFocused);
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') notifyFocused();
+  });
+  // Cover the case where focus is already on this tab when the page first loads.
+  if (document.hasFocus && document.hasFocus()) {
+    setTimeout(notifyFocused, 100);
+  }
   // Poll for hash changes and title updates
   var _lastTitle = '';
   setInterval(function() {
@@ -361,6 +586,7 @@ impl Default for AppConfig {
             renderer: default_renderer(),
             language: default_language(),
             open_tabs: vec![],
+            open_groups: vec![],
         }
     }
 }
@@ -374,10 +600,16 @@ fn config_path() -> PathBuf {
 }
 
 fn load_config() -> AppConfig {
-    fs::read_to_string(config_path())
+    let mut cfg: AppConfig = fs::read_to_string(config_path())
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Migrate legacy `open_tabs` → single group in `open_groups`.
+    if cfg.open_groups.is_empty() && !cfg.open_tabs.is_empty() {
+        cfg.open_groups = vec![cfg.open_tabs.clone()];
+    }
+    cfg.open_tabs.clear();
+    cfg
 }
 
 fn save_config(config: &AppConfig) {
@@ -393,6 +625,57 @@ static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 // Ordered list of (label, url) — preserves tab order for session restore
 static TAB_URLS: OnceLock<std::sync::RwLock<Vec<(String, String)>>> = OnceLock::new();
+
+// Per-window menu mode ("dashboard" / "workspace") — needed so the menu
+// reflects whichever window currently has focus, not whichever window last
+// posted a /set-view event.
+static WINDOW_MODES: OnceLock<std::sync::RwLock<HashMap<String, String>>> = OnceLock::new();
+
+fn set_window_mode(label: &str, mode: &str) {
+    if let Some(map) = WINDOW_MODES.get() {
+        if let Ok(mut m) = map.write() {
+            m.insert(label.to_string(), mode.to_string());
+        }
+    }
+}
+
+fn get_window_mode(label: &str) -> Option<String> {
+    WINDOW_MODES
+        .get()
+        .and_then(|m| m.read().ok())
+        .and_then(|m| m.get(label).cloned())
+}
+
+fn forget_window_mode(label: &str) {
+    if let Some(map) = WINDOW_MODES.get() {
+        if let Ok(mut m) = map.write() {
+            m.remove(label);
+        }
+    }
+}
+
+/// Returns the menu mode of the currently focused Penpot window, falling
+/// back to any tracked mode, then "dashboard".
+fn focused_window_mode(app: &tauri::AppHandle) -> String {
+    if let Some(focused_label) = app
+        .webview_windows()
+        .into_iter()
+        .find(|(_, w)| w.is_focused().unwrap_or(false))
+        .map(|(label, _)| label)
+    {
+        if let Some(mode) = get_window_mode(&focused_label) {
+            return mode;
+        }
+    }
+    if let Some(map) = WINDOW_MODES.get() {
+        if let Ok(m) = map.read() {
+            if let Some((_, mode)) = m.iter().next() {
+                return mode.clone();
+            }
+        }
+    }
+    "dashboard".to_string()
+}
 
 fn normalize_tab_url(url: &str) -> String {
     // Store only the path+hash portion, stripping the origin so restore works
@@ -424,12 +707,16 @@ fn track_tab_url(label: &str, url: &str) {
     }
 }
 
-/// Get visual tab order from macOS native tab bar (left to right)
+/// Discover all tab groups across every top-level window.
+/// Returns a `Vec<Vec<String>>` where each inner vec is one group of
+/// Tauri labels in visual (left→right) tab-bar order. Standalone
+/// windows without siblings become a single-element group.
 #[cfg(target_os = "macos")]
-fn get_visual_tab_order(app: &tauri::AppHandle) -> Vec<String> {
+fn get_all_tab_groups(app: &tauri::AppHandle) -> Vec<Vec<String>> {
     use tauri::Manager;
+    use std::collections::HashSet;
 
-    // Build NSWindow pointer → Tauri label mapping
+    // NSWindow pointer → Tauri label
     let mut ns_to_label: HashMap<usize, String> = HashMap::new();
     for (label, window) in app.webview_windows() {
         if let Ok(ptr) = window.ns_window() {
@@ -437,29 +724,54 @@ fn get_visual_tab_order(app: &tauri::AppHandle) -> Vec<String> {
         }
     }
 
-    // Read tabbedWindows from main window (visually ordered L→R)
-    if let Some(main_win) = app.get_webview_window("main") {
-        if let Ok(main_ns) = main_win.ns_window() {
-            let main_ns: *mut objc2::runtime::AnyObject = main_ns.cast();
-            unsafe {
-                let tabbed: *mut objc2::runtime::AnyObject =
-                    objc2::msg_send![main_ns, tabbedWindows];
-                if !tabbed.is_null() {
-                    let count: usize = objc2::msg_send![tabbed, count];
-                    let mut order = Vec::new();
-                    for i in 0..count {
-                        let win: *mut objc2::runtime::AnyObject =
-                            objc2::msg_send![tabbed, objectAtIndex: i];
-                        if let Some(label) = ns_to_label.get(&(win as usize)) {
-                            order.push(label.clone());
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut groups: Vec<Vec<String>> = Vec::new();
+
+    // Process "main" first so that the main window's group is always groups[0].
+    let mut labels_to_visit: Vec<String> = Vec::new();
+    if app.get_webview_window("main").is_some() {
+        labels_to_visit.push("main".to_string());
+    }
+    for (label, _) in app.webview_windows() {
+        if label != "main" {
+            labels_to_visit.push(label);
+        }
+    }
+
+    for label in &labels_to_visit {
+        if seen.contains(label) {
+            continue;
+        }
+        let Some(win) = app.get_webview_window(label) else { continue };
+        let Ok(ns_ptr) = win.ns_window() else { continue };
+        let ns: *mut objc2::runtime::AnyObject = ns_ptr.cast();
+
+        let mut group: Vec<String> = Vec::new();
+        unsafe {
+            let tabbed: *mut objc2::runtime::AnyObject =
+                objc2::msg_send![ns, tabbedWindows];
+            if !tabbed.is_null() {
+                let count: usize = objc2::msg_send![tabbed, count];
+                for i in 0..count {
+                    let tab_ns: *mut objc2::runtime::AnyObject =
+                        objc2::msg_send![tabbed, objectAtIndex: i];
+                    if let Some(lbl) = ns_to_label.get(&(tab_ns as usize)) {
+                        if !seen.contains(lbl) {
+                            group.push(lbl.clone());
+                            seen.insert(lbl.clone());
                         }
                     }
-                    return order;
                 }
             }
         }
+        if group.is_empty() {
+            // Standalone window (no tab siblings)
+            group.push(label.clone());
+            seen.insert(label.clone());
+        }
+        groups.push(group);
     }
-    vec![]
+    groups
 }
 
 fn untrack_tab(label: &str) {
@@ -495,10 +807,12 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
 
     let config_for_api = config.clone();
     let config_for_assets = config.clone();
+    let config_for_internal = config.clone();
     let config_for_ws = config.clone();
     let error_tracker = Arc::new(Mutex::new(ErrorTracker::new()));
     let error_tracker_api = error_tracker.clone();
     let error_tracker_assets = error_tracker.clone();
+    let error_tracker_internal = error_tracker.clone();
     let config_for_cfg = config.clone();
     let config_for_set = config.clone();
 
@@ -575,21 +889,8 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                     drop(c);
                     // Rebuild menus with new language
                     if let Some(app) = APP_HANDLE.get() {
-                        // Detect current mode from any window's URL
-                        let mode = app
-                            .webview_windows()
-                            .values()
-                            .next()
-                            .and_then(|w| w.url().ok())
-                            .map(|u| {
-                                if u.as_str().contains("/workspace") {
-                                    "workspace"
-                                } else {
-                                    "dashboard"
-                                }
-                            })
-                            .unwrap_or("dashboard");
-                        if let Ok((menu, _)) = build_menu(&app, mode) {
+                        let mode = focused_window_mode(app);
+                        if let Ok((menu, _)) = build_menu(&app, &mode) {
                             let _ = app.set_menu(menu);
                             #[cfg(target_os = "macos")]
                             {
@@ -621,33 +922,84 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             }
         });
 
-    // ── POST /__penpot_desktop/set-view → switch menu mode
+    // ── POST /__penpot_desktop/set-view → record per-window mode and,
+    // if the posting window is currently focused, swap the menu.
     let set_view = warp::path!("__penpot_desktop" / "set-view")
         .and(warp::post())
         .and(warp::body::json())
         .and_then(move |body: serde_json::Value| async move {
             if let Some(mode) = body.get("mode").and_then(|v| v.as_str()) {
-                println!("[menu] switching to: {mode}");
+                let label = body
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !label.is_empty() {
+                    set_window_mode(&label, mode);
+                }
                 if let Some(app) = APP_HANDLE.get() {
-                    if let Ok((menu, _help)) = build_menu(&app, mode) {
-                        let _ = app.set_menu(menu);
-                        #[cfg(target_os = "macos")]
-                        {
-                            app.run_on_main_thread(|| {
-                                register_help_menu();
-                            })
-                            .ok();
+                    // Only rebuild the menu if the window that posted is the
+                    // one currently focused (or if we can't tell — fall back to
+                    // updating, so the very first window still gets a menu).
+                    let focused_label = app
+                        .webview_windows()
+                        .into_iter()
+                        .find(|(_, w)| w.is_focused().unwrap_or(false))
+                        .map(|(l, _)| l);
+                    let should_update = match (&focused_label, label.is_empty()) {
+                        (Some(f), false) => f == &label,
+                        (None, _) => true,
+                        (_, true) => true,
+                    };
+                    if should_update {
+                        if let Ok((menu, _help)) = build_menu(&app, mode) {
+                            let _ = app.set_menu(menu);
+                            #[cfg(target_os = "macos")]
+                            {
+                                app.run_on_main_thread(|| {
+                                    register_help_menu();
+                                })
+                                .ok();
+                            }
+                            // In workspace mode, disable selection-dependent items initially
+                            if mode == "workspace" {
+                                update_selection_items(app, false);
+                            }
                         }
-                        // In workspace mode, disable selection-dependent items initially
-                        if mode == "workspace" {
-                            update_selection_items(app, false);
-                        }
-                        println!("[menu] switched to: {mode}");
-                    } else {
-                        eprintln!("[menu] failed to build menu for: {mode}");
                     }
-                } else {
-                    eprintln!("[menu] APP_HANDLE not set");
+                }
+            }
+            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+        });
+
+    // ── POST /__penpot_desktop/window-focused → JS-driven focus notification.
+    // macOS native tabs don't always surface NSWindow key changes through Tauri,
+    // so each Penpot webview tells us when its document gains focus and we
+    // rebuild the menu from the stored mode for that label.
+    let window_focused = warp::path!("__penpot_desktop" / "window-focused")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| async move {
+            let label = body
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !label.is_empty() {
+                if let Some(mode) = get_window_mode(&label) {
+                    if let Some(app) = APP_HANDLE.get() {
+                        let app_handle = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if let Ok((menu, _)) = build_menu(&app_handle, &mode) {
+                                let _ = app_handle.set_menu(menu);
+                                #[cfg(target_os = "macos")]
+                                register_help_menu();
+                                if mode == "workspace" {
+                                    update_selection_items(&app_handle, false);
+                                }
+                            }
+                        });
+                    }
                 }
             }
             Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
@@ -724,7 +1076,9 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             }
         });
 
-    // ── POST /__penpot_desktop/open-tab → open URL in a new native tab
+    // ── POST /__penpot_desktop/open-tab → open URL in a new native tab,
+    // or in the system browser if the URL points to a foreign origin
+    // (e.g. plugin help links, GitHub, …).
     let open_tab_port = port;
     let open_tab = warp::path!("__penpot_desktop" / "open-tab")
         .and(warp::post())
@@ -734,12 +1088,26 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             async move {
                 if let Some(url) = body.get("url").and_then(|v| v.as_str()) {
                     let url = url.to_string();
+                    // Decide: external URL → system browser, otherwise → in-app tab.
+                    // External = absolute http(s) whose host is not 127.0.0.1/localhost.
+                    let is_external = url::Url::parse(&url)
+                        .ok()
+                        .map(|u| {
+                            (u.scheme() == "http" || u.scheme() == "https")
+                                && !matches!(u.host_str(), Some("127.0.0.1") | Some("localhost"))
+                        })
+                        .unwrap_or(false);
                     if let Some(app) = APP_HANDLE.get() {
-                        let app_for_run = app.clone();
-                        let app_for_tab = app.clone();
-                        let _ = app_for_run.run_on_main_thread(move || {
-                            let _ = create_tab_window(&app_for_tab, port, Some(&url));
-                        });
+                        if is_external {
+                            use tauri_plugin_opener::OpenerExt;
+                            let _ = app.opener().open_url(&url, None::<&str>);
+                        } else {
+                            let app_for_run = app.clone();
+                            let app_for_tab = app.clone();
+                            let _ = app_for_run.run_on_main_thread(move || {
+                                let _ = create_tab_window(&app_for_tab, port, Some(&url), None);
+                            });
+                        }
                     }
                 }
                 Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
@@ -780,6 +1148,43 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             }
             Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
         });
+
+    // ── GET/* /__penpot_desktop/cors-proxy?url=... → relay arbitrary HTTPS targets
+    // Bypasses browser CORS for cross-origin fetches (e.g. Penpot plugin manifests).
+    // The fetch is performed by reqwest in Rust, so no preflight or Origin check happens.
+    let cors_proxy = warp::path!("__penpot_desktop" / "cors-proxy")
+        .and(warp::method())
+        .and(warp::query::<HashMap<String, String>>())
+        .and(warp::header::headers_cloned())
+        .and(warp::body::bytes())
+        .and_then(
+            |method: warp::http::Method,
+             query: HashMap<String, String>,
+             headers: warp::http::HeaderMap,
+             body: bytes::Bytes| async move {
+                let Some(target) = query.get("url").cloned() else {
+                    return Ok::<_, warp::Rejection>(
+                        warp::http::Response::builder()
+                            .status(400)
+                            .body(bytes::Bytes::from("missing url"))
+                            .unwrap(),
+                    );
+                };
+                if !target.starts_with("http://") && !target.starts_with("https://") {
+                    return Ok(warp::http::Response::builder()
+                        .status(400)
+                        .body(bytes::Bytes::from("invalid scheme"))
+                        .unwrap());
+                }
+                match proxy_request_inner(&target, method, headers, body, false).await {
+                    Ok(resp) => Ok(resp),
+                    Err(e) => Ok(warp::http::Response::builder()
+                        .status(502)
+                        .body(bytes::Bytes::from(format!("cors-proxy error: {e}")))
+                        .unwrap()),
+                }
+            },
+        );
 
     // ── Proxy /api/* → backend
     let api_proxy = warp::path("api")
@@ -1058,10 +1463,71 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             },
         );
 
+    // ── Proxy /internal/* → backend (e.g. /internal/gfonts/css, /internal/gfonts/font/*)
+    // Penpot's frontend rewrites Google Fonts URLs to {public_uri}/internal/gfonts/...
+    // for both the SVG renderer (@font-face CSS) and the WASM canvas renderer (font binaries).
+    // Without this proxy route, /internal/* falls through to static_files and 404s, so
+    // text never picks up the selected font in the desktop app.
+    let internal_proxy = warp::path("internal")
+        .and(warp::path::tail())
+        .and(warp::query::raw().or(warp::any().map(String::new)).unify())
+        .and(warp::method())
+        .and(warp::header::headers_cloned())
+        .and(warp::body::bytes())
+        .and_then(
+            move |tail: warp::path::Tail,
+                  query: String,
+                  method: warp::http::Method,
+                  headers: warp::http::HeaderMap,
+                  body: bytes::Bytes| {
+                let cfg = config_for_internal.clone();
+                let et = error_tracker_internal.clone();
+                async move {
+                    let c = cfg.read().await;
+                    if c.backend_url.is_empty() {
+                        return Ok::<_, warp::Rejection>(
+                            warp::http::Response::builder()
+                                .status(503)
+                                .body(bytes::Bytes::from("Backend URL not configured"))
+                                .unwrap(),
+                        );
+                    }
+                    let target = if query.is_empty() {
+                        format!(
+                            "{}/internal/{}",
+                            c.backend_url.trim_end_matches('/'),
+                            tail.as_str()
+                        )
+                    } else {
+                        format!(
+                            "{}/internal/{}?{}",
+                            c.backend_url.trim_end_matches('/'),
+                            tail.as_str(),
+                            query
+                        )
+                    };
+                    drop(c);
+
+                    match proxy_request(&target, method, headers, body).await {
+                        Ok(resp) => Ok(resp),
+                        Err(e) => {
+                            let msg = format!("[proxy] internal error: {e}");
+                            et.lock().await.log("internal", &msg);
+                            Ok(warp::http::Response::builder()
+                                .status(502)
+                                .body(bytes::Bytes::from(format!("Proxy error: {e}")))
+                                .unwrap())
+                        }
+                    }
+                }
+            },
+        );
+
     // ── Combine all routes (order matters!) ──────────────────
     let routes = get_config
         .or(set_backend)
         .or(set_view)
+        .or(window_focused)
         .or(set_selection)
         .or(get_clipboard)
         .or(set_language)
@@ -1069,12 +1535,14 @@ async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         .or(set_title)
         .or(open_tab)
         .or(update_tab_url)
+        .or(cors_proxy)
         .or(settings_page)
         .or(settings_app_icon)
         .or(config_js)
         .or(desktop_config_js)
         .or(api_proxy)
         .or(assets_proxy)
+        .or(internal_proxy)
         .or(ws_proxy)
         .or(static_files);
 
@@ -1092,6 +1560,45 @@ async fn proxy_request(
     method: warp::http::Method,
     headers: warp::http::HeaderMap,
     body: bytes::Bytes,
+) -> Result<warp::http::Response<bytes::Bytes>, String> {
+    proxy_request_inner(target, method, headers, body, true).await
+}
+
+/// Remove every `<meta http-equiv="Content-Security-Policy" ...>` tag from an HTML
+/// string. Used in cors-proxy mode so the body-level CSP doesn't block our
+/// injected inline shim script. Case-insensitive, attribute-order-tolerant.
+fn strip_csp_meta_tags(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let needle = "content-security-policy";
+    let mut out = String::with_capacity(html.len());
+    let mut cursor = 0usize;
+    while let Some(meta_rel) = lower[cursor..].find("<meta") {
+        let meta_start = cursor + meta_rel;
+        let after_meta = meta_start + "<meta".len();
+        let Some(close_rel) = lower[after_meta..].find('>') else {
+            break;
+        };
+        let tag_end = after_meta + close_rel + 1;
+        let tag_lower = &lower[meta_start..tag_end];
+        // Only drop tags whose http-equiv targets CSP
+        if tag_lower.contains("http-equiv") && tag_lower.contains(needle) {
+            out.push_str(&html[cursor..meta_start]);
+            cursor = tag_end;
+        } else {
+            out.push_str(&html[cursor..tag_end]);
+            cursor = tag_end;
+        }
+    }
+    out.push_str(&html[cursor..]);
+    out
+}
+
+async fn proxy_request_inner(
+    target: &str,
+    method: warp::http::Method,
+    headers: warp::http::HeaderMap,
+    body: bytes::Bytes,
+    rewrite_body: bool,
 ) -> Result<warp::http::Response<bytes::Bytes>, String> {
     // Extract backend origin from the target URL for header rewriting
     let backend_origin = url::Url::parse(target)
@@ -1142,7 +1649,37 @@ async fn proxy_request(
             || name == "connection"
             || name == "content-encoding"
             || name == "content-length"
+            // Strip framing headers — Penpot Desktop never iframes Penpot itself,
+            // and cors-proxy responses are loaded inside iframes that would
+            // otherwise be blocked by upstream X-Frame-Options / frame-ancestors.
+            || name == "x-frame-options"
         {
+            continue;
+        }
+        if name == "content-security-policy" || name == "content-security-policy-report-only" {
+            // In cors-proxy mode (rewrite_body=false), drop CSP entirely — we
+            // need to inject inline scripts (the iframe shim) and the iframe
+            // is already sandboxed by the parent's iframe element. Otherwise
+            // (Penpot api/assets mode), only drop frame-* directives so the
+            // response can still be iframed safely.
+            if !rewrite_body {
+                continue;
+            }
+            if let Ok(csp) = value.to_str() {
+                let cleaned: String = csp
+                    .split(';')
+                    .map(|d| d.trim())
+                    .filter(|d| {
+                        let lower = d.to_lowercase();
+                        !lower.starts_with("frame-ancestors")
+                            && !lower.starts_with("frame-src")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                if !cleaned.is_empty() {
+                    builder = builder.header(key.as_str(), cleaned);
+                }
+            }
             continue;
         }
         if name == "set-cookie" {
@@ -1175,8 +1712,9 @@ async fn proxy_request(
     let is_text = content_type.contains("json")
         || content_type.contains("transit")
         || content_type.contains("text");
+    let is_html = content_type.contains("html");
 
-    let final_body = if is_text && !backend_origin.is_empty() {
+    let final_body = if rewrite_body && is_text && !backend_origin.is_empty() {
         let body_str = String::from_utf8_lossy(&resp_body);
         if body_str.contains(&backend_origin) {
             let rewritten = body_str.replace(&backend_origin, "http://127.0.0.1:7080");
@@ -1184,6 +1722,56 @@ async fn proxy_request(
         } else {
             resp_body
         }
+    } else if !rewrite_body && is_html {
+        // cors-proxy mode + HTML: inject <base href> so relative URLs resolve to
+        // the original origin, and inject the cross-origin fetch shim so plugin
+        // code that uses fetch() also funnels through the proxy.
+        let raw = String::from_utf8_lossy(&resp_body).into_owned();
+        // Strip <meta http-equiv="Content-Security-Policy" ...> tags so the
+        // body-level CSP doesn't block our injected inline shim script.
+        let body_str = strip_csp_meta_tags(&raw);
+        let base_href = url::Url::parse(target)
+            .ok()
+            .and_then(|mut u| {
+                u.set_query(None);
+                u.set_fragment(None);
+                // Strip the file portion: keep everything up to the last "/"
+                if let Ok(mut segs) = u.path_segments_mut() {
+                    segs.pop();
+                    segs.push("");
+                }
+                Some(u.to_string())
+            })
+            .unwrap_or_default();
+        let injection = format!(
+            "<base href=\"{}\"><script>{}</script>",
+            base_href.replace('"', "&quot;"),
+            IFRAME_SHIM_JS
+        );
+        let injected = if let Some(idx) = body_str.to_lowercase().find("<head>") {
+            let insert_at = idx + "<head>".len();
+            let mut s = String::with_capacity(body_str.len() + injection.len());
+            s.push_str(&body_str[..insert_at]);
+            s.push_str(&injection);
+            s.push_str(&body_str[insert_at..]);
+            s
+        } else if let Some(idx) = body_str.to_lowercase().find("<head") {
+            // <head> with attributes — find the closing >
+            if let Some(close) = body_str[idx..].find('>') {
+                let insert_at = idx + close + 1;
+                let mut s = String::with_capacity(body_str.len() + injection.len());
+                s.push_str(&body_str[..insert_at]);
+                s.push_str(&injection);
+                s.push_str(&body_str[insert_at..]);
+                s
+            } else {
+                injection + &body_str
+            }
+        } else {
+            // No <head> at all — prepend
+            injection + &body_str
+        };
+        bytes::Bytes::from(injected)
     } else {
         resp_body
     };
@@ -1279,6 +1867,7 @@ fn create_tab_window(
     app: &tauri::AppHandle,
     port: u16,
     url: Option<&str>,
+    anchor_label: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
 
@@ -1387,10 +1976,25 @@ fn create_tab_window(
     }
     let _new_win = builder.build()?;
 
-    // macOS: add new window as the last tab in the existing window
+    // macOS: add new window as the last tab in the existing window. Use any existing
+    // webview window as the tab anchor — not the literal "main" label, which can be gone
+    // after a backend/renderer switch (set-backend closes non-settings tabs).
     #[cfg(target_os = "macos")]
     {
-        if let Some(main_win) = app.get_webview_window("main") {
+        let anchor_win = anchor_label
+            .and_then(|al| app.get_webview_window(al))
+            .or_else(|| {
+                app.webview_windows()
+                    .into_values()
+                    .find(|w| w.is_focused().unwrap_or(false))
+            })
+            .or_else(|| {
+                app.webview_windows()
+                    .into_iter()
+                    .find(|(l, _)| l != &label)
+                    .map(|(_, w)| w)
+            });
+        if let Some(main_win) = anchor_win {
             if let Some(new_win) = app.get_webview_window(&label) {
                 let main_ns: *mut objc2::runtime::AnyObject = main_win.ns_window().unwrap().cast();
                 let new_ns: *mut objc2::runtime::AnyObject = new_win.ns_window().unwrap().cast();
@@ -1418,6 +2022,85 @@ fn create_tab_window(
     }
 
     Ok(())
+}
+
+/// Create a standalone Penpot window — no `tabbing_identifier`, so it appears
+/// as a separate top-level window rather than a tab in the existing group.
+fn create_standalone_window(
+    app: &tauri::AppHandle,
+    port: u16,
+    url: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use tauri::webview::WebviewWindowBuilder;
+
+    let n = TAB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("win-{n}");
+
+    let nav_url = url.unwrap_or("/").to_string();
+    let has_hash = nav_url.contains('#');
+    let initial_url = if has_hash {
+        format!("http://127.0.0.1:{port}/")
+    } else if nav_url.starts_with("http") {
+        nav_url.clone()
+    } else {
+        format!("http://127.0.0.1:{port}{nav_url}")
+    };
+    let restore_url = if has_hash {
+        let full = if nav_url.starts_with("http") {
+            nav_url.clone()
+        } else {
+            format!("http://127.0.0.1:{port}{nav_url}")
+        };
+        Some(full)
+    } else {
+        None
+    };
+
+    let label_for_load = label.clone();
+    let restore_for_load = restore_url.clone();
+    let mut b = WebviewWindowBuilder::new(
+        app,
+        &label,
+        tauri::WebviewUrl::External(initial_url.parse().unwrap()),
+    )
+    .title("Penpot Desktop")
+    .inner_size(1440.0, 900.0)
+    .min_inner_size(900.0, 600.0)
+    .disable_drag_drop_handler()
+    .on_navigation(|url| url.scheme() == "blob" || url.host_str() == Some("127.0.0.1"))
+    .on_page_load(move |webview, payload| {
+        if let tauri::webview::PageLoadEvent::Finished = payload.event() {
+            let lbl = &label_for_load;
+            let restore_js = if let Some(ref u) = restore_for_load {
+                let escaped = u.replace('\\', "\\\\").replace('\'', "\\'");
+                format!("if(!window.__penpotRestored){{window.__penpotRestored=true;window.location.replace('{escaped}');}}")
+            } else {
+                String::new()
+            };
+            let _ = webview.eval(&format!(
+                "window.__penpotWindowLabel='{lbl}';\
+                 {restore_js}\
+                 if(!window.__penpotUrlTracker){{window.__penpotUrlTracker=true;\
+                   var __pptLastUrl='';\
+                   setInterval(()=>{{\
+                     if(location.href!==__pptLastUrl){{\
+                       __pptLastUrl=location.href;\
+                       navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
+                         JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}}));\
+                     }}\
+                   }},2000);\
+                   window.addEventListener('beforeunload',()=>\
+                     navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
+                       JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}})));\
+                 }}"
+            ));
+        }
+    });
+    if let Some(ua) = safari_user_agent() {
+        b = b.user_agent(&ua);
+    }
+    b.build()?;
+    Ok(label)
 }
 
 #[cfg(target_os = "macos")]
@@ -1486,7 +2169,7 @@ fn update_selection_items(app: &tauri::AppHandle, enabled: bool) {
 
 #[cfg(target_os = "macos")]
 fn prettify_shortcut(raw: &str) -> String {
-    if !raw.contains('+') {
+    if !raw.contains('+') || raw == "+" {
         return raw.to_string();
     }
     let parts: Vec<&str> = raw.split('+').collect();
@@ -1943,14 +2626,38 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(shared_config.clone())
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                untrack_tab(window.label());
+            match event {
+                tauri::WindowEvent::Destroyed => {
+                    untrack_tab(window.label());
+                    forget_window_mode(window.label());
+                }
+                tauri::WindowEvent::Focused(true) => {
+                    // Settings webviews don't have a tracked Penpot mode; leave the
+                    // current menu in place when focusing them.
+                    let label = window.label().to_string();
+                    if let Some(mode) = get_window_mode(&label) {
+                        let app = window.app_handle().clone();
+                        let app_for_closure = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if let Ok((menu, _)) = build_menu(&app_for_closure, &mode) {
+                                let _ = app_for_closure.set_menu(menu);
+                                #[cfg(target_os = "macos")]
+                                register_help_menu();
+                                if mode == "workspace" {
+                                    update_selection_items(&app_for_closure, false);
+                                }
+                            }
+                        });
+                    }
+                }
+                _ => {}
             }
         })
         .setup(move |app| {
             // Store app handle for proxy → menu communication
             APP_HANDLE.get_or_init(|| app.handle().clone());
             TAB_URLS.get_or_init(|| std::sync::RwLock::new(Vec::new()));
+            WINDOW_MODES.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
 
             // Set initial menu (dashboard mode)
             let (initial_menu, _) = build_menu(&app.handle(), "dashboard")
@@ -1959,19 +2666,122 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             register_help_menu();
 
+            // Poll which window is currently focused and rebuild the menu
+            // when it changes. macOS native tabs share one NSWindow, so
+            // neither Tauri's WindowEvent::Focused nor JS focus events fire
+            // reliably on tab-bar clicks — webview.is_focused() does report
+            // the truth via NSWindow.isKeyWindow.
+            let app_for_poll = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use std::sync::Mutex as StdMutex;
+                let last_key: StdMutex<Option<(String, String)>> = StdMutex::new(None);
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    let focused_label = app_for_poll
+                        .webview_windows()
+                        .into_iter()
+                        .find(|(_, w)| w.is_focused().unwrap_or(false))
+                        .map(|(l, _)| l);
+                    let Some(focused_label) = focused_label else { continue };
+
+                    let Some(mode) = get_window_mode(&focused_label) else {
+                        continue;
+                    };
+                    let key = (focused_label.clone(), mode.clone());
+                    let changed = {
+                        let mut last = last_key.lock().unwrap();
+                        if last.as_ref() == Some(&key) {
+                            false
+                        } else {
+                            *last = Some(key.clone());
+                            true
+                        }
+                    };
+                    if !changed {
+                        continue;
+                    }
+                    let app_clone = app_for_poll.clone();
+                    let mode_clone = mode.clone();
+                    let _ = app_for_poll.run_on_main_thread(move || {
+                        if let Ok((menu, _)) = build_menu(&app_clone, &mode_clone) {
+                            let _ = app_clone.set_menu(menu);
+                            #[cfg(target_os = "macos")]
+                            register_help_menu();
+                            if mode_clone == "workspace" {
+                                update_selection_items(&app_clone, false);
+                            }
+                        }
+                    });
+                }
+            });
+
             // Handle menu events — simulate keyboard shortcuts for Penpot
             let port_for_menu = port;
             app.on_menu_event(move |app, event| {
-                let Some(window) = app.get_webview_window("main") else { return };
                 let id = event.id().as_ref();
+
+                // Window-independent actions: handle before looking up a target window,
+                // so the menu keeps working even if every Penpot window has been closed
+                // (e.g. after switching backend/renderer, which closes non-settings tabs).
+                match id {
+                    "settings" => {
+                        let _ = create_tab_window(app, port_for_menu, Some("/__penpot_desktop"), None);
+                        return;
+                    }
+                    "new-tab" => {
+                        let focused = app.webview_windows().into_iter()
+                            .find(|(_, w)| w.is_focused().unwrap_or(false))
+                            .map(|(l, _)| l);
+                        let _ = create_tab_window(app, port_for_menu, None, focused.as_deref());
+                        return;
+                    }
+                    "new-window" => {
+                        let _ = create_standalone_window(app, port_for_menu, None);
+                        return;
+                    }
+                    "help-guide" | "help-tutorials" | "help-courses" |
+                    "help-plugins" | "help-libraries" |
+                    "help-community" | "help-github" | "help-feedback" |
+                    "help-website" | "help-release-notes" => {
+                        let url = match id {
+                            "help-guide" => "https://help.penpot.app",
+                            "help-tutorials" => "https://www.youtube.com/@Penpot",
+                            "help-community" => "https://community.penpot.app",
+                            "help-github" => "https://github.com/penpot/penpot",
+                            "help-feedback" => "https://github.com/penpot/penpot/issues",
+                            "help-website" => "https://penpot.app",
+                            "help-courses" => "https://penpot.app/courses/",
+                            "help-plugins" => "https://penpot.app/penpothub/plugins",
+                            "help-libraries" => "https://penpot.app/penpothub/libraries-templates",
+                            "help-release-notes" => "https://penpot.app/dev-diaries",
+                            _ => return,
+                        };
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app.opener().open_url(url, None::<&str>);
+                        return;
+                    }
+                    _ => {}
+                }
+
+                // Window-dependent actions: prefer the focused webview, fall back to any
+                // non-settings webview, then to anything that's still around. Don't hard-code
+                // the literal "main" label — it gets closed on backend switches.
+                let window = app
+                    .webview_windows()
+                    .into_values()
+                    .find(|w| w.is_focused().unwrap_or(false))
+                    .or_else(|| {
+                        app.webview_windows().into_values().find(|w| {
+                            w.url()
+                                .map(|u| !u.path().contains("__penpot_desktop"))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .or_else(|| app.webview_windows().into_values().next());
+                let Some(window) = window else { return };
 
                 // Map menu IDs to Mousetrap key sequences
                 let shortcut = match id {
-                    // App
-                    "settings" => {
-                        let _ = create_tab_window(app, port_for_menu, Some("/__penpot_desktop"));
-                        return;
-                    }
                     // Native actions
                     "devtools" => {
                         if window.is_devtools_open() { window.close_devtools(); }
@@ -1986,28 +2796,8 @@ pub fn run() {
                         let _ = window.eval("location.reload()");
                         return;
                     }
-                    "new-tab" => {
-                        let _ = create_tab_window(app, port_for_menu, None);
-                        return;
-                    }
                     "close-tab" => {
                         let _ = window.close();
-                        return;
-                    }
-                    "new-window" => {
-                        use tauri::webview::WebviewWindowBuilder;
-                        let n = TAB_COUNTER.fetch_add(1, Ordering::Relaxed);
-                        let label = format!("win-{n}");
-                        let url = format!("http://127.0.0.1:{port_for_menu}/");
-                        let mut b = WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url.parse().unwrap()))
-                            .title("")
-                            .inner_size(1440.0, 900.0)
-                            .min_inner_size(900.0, 600.0)
-                            .disable_drag_drop_handler();
-                        if let Some(ua) = safari_user_agent() {
-                            b = b.user_agent(&ua);
-                        }
-                        let _ = b.build();
                         return;
                     }
 
@@ -2127,38 +2917,17 @@ pub fn run() {
                         return;
                     }
 
-                    // Help — open external URLs in default browser
-                    "help-guide" | "help-tutorials" | "help-courses" |
-                    "help-plugins" | "help-libraries" |
-                    "help-community" | "help-github" | "help-feedback" |
-                    "help-website" | "help-release-notes" => {
-                        let url = match id {
-                            "help-guide" => "https://help.penpot.app",
-                            "help-tutorials" => "https://www.youtube.com/@Penpot",
-                            "help-community" => "https://community.penpot.app",
-                            "help-github" => "https://github.com/penpot/penpot",
-                            "help-feedback" => "https://github.com/penpot/penpot/issues",
-                            "help-website" => "https://penpot.app",
-                            "help-courses" => "https://penpot.app/courses/",
-                            "help-plugins" => "https://penpot.app/penpothub/plugins",
-                            "help-libraries" => "https://penpot.app/penpothub/libraries-templates",
-                            "help-release-notes" => "https://penpot.app/dev-diaries",
-                            _ => return,
-                        };
-                        use tauri_plugin_opener::OpenerExt;
-                        let _ = app.opener().open_url(url, None::<&str>);
-                        return;
-                    }
+                    // Help
                     "help-shortcuts" => "?",
 
                     _ => return,
                 };
 
-                // Simulate keyboard event with proper keyCode for Mousetrap
-                let js = format!(
-                    "window.__penpotKey('{shortcut}')",
-                    shortcut = shortcut
-                );
+                // Simulate keyboard event with proper keyCode for Mousetrap.
+                // Escape backslash and single-quote so shortcuts containing them
+                // (e.g. "meta+'" for guides, "\\" for hide-ui) don't break the JS literal.
+                let escaped_shortcut = shortcut.replace('\\', "\\\\").replace('\'', "\\'");
+                let js = format!("window.__penpotKey('{escaped_shortcut}')");
                 let _ = window.eval(&js);
             });
 
@@ -2171,11 +2940,11 @@ pub fn run() {
             // Create main window with download handler
             use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
 
-            // Read saved tabs early so we can inject hash into main window
+            // Read saved window groups early so we can inject hash into main window
             let no_backend = shared_config.try_read().map(|c| c.backend_url.is_empty()).unwrap_or(true);
-            let saved_tabs: Vec<String> = if !no_backend {
+            let saved_groups: Vec<Vec<String>> = if !no_backend {
                 shared_config.try_read()
-                    .map(|c| c.open_tabs.clone())
+                    .map(|c| c.open_groups.clone())
                     .unwrap_or_default()
             } else {
                 vec![]
@@ -2259,14 +3028,14 @@ pub fn run() {
             };
 
             let main_tab_url = if !no_backend {
-                saved_tabs.first().cloned()
+                saved_groups.first().and_then(|g| g.first()).cloned()
             } else {
                 None
             };
             let default_hash = if !no_backend {
                 let wasm = shared_config.try_read()
                     .map(|c| c.renderer == "wasm")
-                    .unwrap_or(true);
+                    .unwrap_or(false);
                 Some(format!("#/?wasm={wasm}"))
             } else {
                 None
@@ -2296,18 +3065,58 @@ pub fn run() {
                     ));
                 }
 
-                // Restore additional tabs from previous session
-                if saved_tabs.len() > 1 {
+                // Restore window groups from previous session.
+                // Group 0: extra tabs go into the main window's tab bar.
+                // Groups 1+: first URL becomes a standalone window, the rest
+                // are tabs anchored to it.
+                for (gi, group) in saved_groups.iter().enumerate() {
+                    let skip = if gi == 0 { 1 } else { 0 }; // group 0's first URL is already in main
+                    let urls: Vec<String> = group.iter().skip(skip).cloned().collect();
+                    if urls.is_empty() {
+                        continue;
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    for tab_url in &saved_tabs[1..] {
+
+                    if gi == 0 {
+                        // Additional tabs for the main window group
+                        for url in &urls {
+                            let _ = app_handle.run_on_main_thread({
+                                let app = app_handle.clone();
+                                let url = url.clone();
+                                move || {
+                                    let _ = create_tab_window(&app, port, Some(&url), Some("main"));
+                                }
+                            });
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                    } else {
+                        // New standalone window group: first URL → standalone, rest → tabs
+                        use std::sync::{Arc, Mutex as StdMutex};
+                        let anchor_label: Arc<StdMutex<Option<String>>> = Arc::new(StdMutex::new(None));
+                        let first_url = urls[0].clone();
+                        let anchor_for_first = anchor_label.clone();
                         let _ = app_handle.run_on_main_thread({
                             let app = app_handle.clone();
-                            let url = tab_url.clone();
                             move || {
-                                let _ = create_tab_window(&app, port, Some(&url));
+                                if let Ok(label) = create_standalone_window(&app, port, Some(&first_url)) {
+                                    *anchor_for_first.lock().unwrap() = Some(label);
+                                }
                             }
                         });
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                        let anchor = anchor_label.lock().unwrap().clone();
+                        for url in &urls[1..] {
+                            let _ = app_handle.run_on_main_thread({
+                                let app = app_handle.clone();
+                                let url = url.clone();
+                                let anchor = anchor.clone();
+                                move || {
+                                    let _ = create_tab_window(&app, port, Some(&url), anchor.as_deref());
+                                }
+                            });
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
                     }
                 }
             });
@@ -2319,36 +3128,37 @@ pub fn run() {
         .expect("Failed to build Penpot Desktop")
         .run(move |app, event| {
             if let tauri::RunEvent::Exit = event {
-                // Save open tab URLs in visual tab order
                 if let Some(list) = TAB_URLS.get() {
                     if let Ok(tab_map) = list.read() {
-                        // Get visual order from macOS native tab bar
-                        #[cfg(target_os = "macos")]
-                        let ordered_labels = get_visual_tab_order(app);
-                        #[cfg(not(target_os = "macos"))]
-                        let ordered_labels: Vec<String> = tab_map.iter()
-                            .map(|(l, _)| l.clone()).collect();
-
                         let url_map: HashMap<&str, &str> = tab_map.iter()
                             .map(|(l, u)| (l.as_str(), u.as_str()))
                             .collect();
 
-                        let urls: Vec<String> = if ordered_labels.is_empty() {
-                            // Fallback: use insertion order
-                            tab_map.iter()
-                                .filter(|(_, u)| !u.is_empty() && !u.contains("__penpot_desktop"))
-                                .map(|(_, url)| url.clone())
-                                .collect()
-                        } else {
-                            ordered_labels.iter()
-                                .filter_map(|label| url_map.get(label.as_str()).copied())
-                                .filter(|u| !u.is_empty() && !u.contains("__penpot_desktop"))
-                                .map(|u| u.to_string())
-                                .collect()
+                        #[cfg(target_os = "macos")]
+                        let label_groups = get_all_tab_groups(app);
+                        #[cfg(not(target_os = "macos"))]
+                        let label_groups: Vec<Vec<String>> = {
+                            // No native tab groups — treat every tracked window
+                            // as its own group.
+                            tab_map.iter().map(|(l, _)| vec![l.clone()]).collect()
                         };
 
+                        let groups: Vec<Vec<String>> = label_groups
+                            .iter()
+                            .map(|group| {
+                                group
+                                    .iter()
+                                    .filter_map(|label| url_map.get(label.as_str()).copied())
+                                    .filter(|u| !u.is_empty() && !u.contains("__penpot_desktop"))
+                                    .map(|u| u.to_string())
+                                    .collect::<Vec<String>>()
+                            })
+                            .filter(|g| !g.is_empty())
+                            .collect();
+
                         let mut cfg = config_for_exit.blocking_write();
-                        cfg.open_tabs = urls;
+                        cfg.open_groups = groups;
+                        cfg.open_tabs.clear();
                         save_config(&cfg);
                     }
                 }
