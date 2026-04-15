@@ -27,7 +27,17 @@
     "group": "Groeperen",
     "ungroup": "Groep opheffen",
     "create-component": "Component maken",
-    "detach-component": "Component loskoppelen"
+    "create-variant": "Variant maken",
+    "detach-component": "Component loskoppelen",
+    "detach-instance": "Instantie loskoppelen",
+    "rename": "Hernoemen",
+    "selection-to-board": "Selectie naar bord",
+    "focus-on": "Focus op",
+    "toggle-visibility": "Verbergen / Tonen",
+    "toggle-lock": "Vergrendelen / Ontgrendelen",
+    "set-thumbnail": "Instellen als miniatuur",
+    "show-in-assets": "Tonen in middelenpaneel",
+    "focus-off": "Focus uit"
   },
   "view": {
     "view": "Weergave",

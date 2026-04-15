@@ -27,7 +27,17 @@
     "group": "Grupla",
     "ungroup": "Grubu çöz",
     "create-component": "Bileşen oluştur",
-    "detach-component": "Bileşeni ayır"
+    "create-variant": "Varyant oluştur",
+    "detach-component": "Bileşeni ayır",
+    "detach-instance": "Örneği ayır",
+    "rename": "Yeniden adlandır",
+    "selection-to-board": "Seçimi panoya",
+    "focus-on": "Odakla",
+    "toggle-visibility": "Gizle / Göster",
+    "toggle-lock": "Kilitle / Kilidini Aç",
+    "set-thumbnail": "Küçük resim olarak ayarla",
+    "show-in-assets": "Varlık panelinde göster",
+    "focus-off": "Odak kapat"
   },
   "view": {
     "view": "Görünüm",

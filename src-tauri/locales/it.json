@@ -27,7 +27,17 @@
     "group": "Raggruppa",
     "ungroup": "Separa gruppo",
     "create-component": "Crea componente",
-    "detach-component": "Stacca componente"
+    "create-variant": "Crea variante",
+    "detach-component": "Stacca componente",
+    "detach-instance": "Stacca istanza",
+    "rename": "Rinomina",
+    "selection-to-board": "Selezione su tavola",
+    "focus-on": "Messa a fuoco",
+    "toggle-visibility": "Nascondi / Mostra",
+    "toggle-lock": "Blocca / Sblocca",
+    "set-thumbnail": "Imposta come miniatura",
+    "show-in-assets": "Mostra nel pannello risorse",
+    "focus-off": "Disattiva focus"
   },
   "view": {
     "view": "Vista",

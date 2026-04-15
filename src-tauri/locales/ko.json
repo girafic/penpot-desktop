@@ -27,7 +27,17 @@
     "group": "그룹",
     "ungroup": "그룹 해제",
     "create-component": "커포넌트 만들기",
-    "detach-component": "커포넌트 분리"
+    "create-variant": "변형 만들기",
+    "detach-component": "커포넌트 분리",
+    "detach-instance": "인스턴스 분리",
+    "rename": "이름 바꾸기",
+    "selection-to-board": "선택을 보드로",
+    "focus-on": "포커스",
+    "toggle-visibility": "숨기기 / 표시",
+    "toggle-lock": "잠금 / 해제",
+    "set-thumbnail": "썸네일로 설정",
+    "show-in-assets": "에셋 패널에 표시",
+    "focus-off": "포커스 해제"
   },
   "view": {
     "view": "보기",

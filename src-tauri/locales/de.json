@@ -10,7 +10,7 @@
     "close-window": "Fenster schließen"
   },
   "file": {
-    "file": "Ablage",
+    "file": "Datei",
     "new-project": "Neues Projekt",
     "export": "Formen exportieren…"
   },
@@ -27,7 +27,17 @@
     "group": "Gruppieren",
     "ungroup": "Gruppierung aufheben",
     "create-component": "Komponente erstellen",
-    "detach-component": "Komponente lösen"
+    "create-variant": "Variante erstellen",
+    "detach-component": "Komponente lösen",
+    "detach-instance": "Instanz trennen",
+    "rename": "Umbenennen",
+    "selection-to-board": "Auswahl auf Zeichenfläche",
+    "focus-on": "Fokus an",
+    "focus-off": "Fokus aus",
+    "toggle-visibility": "Ausblenden / Einblenden",
+    "toggle-lock": "Sperren / Entsperren",
+    "set-thumbnail": "Als Vorschaubild festlegen",
+    "show-in-assets": "Im Assets-Panel anzeigen"
   },
   "view": {
     "view": "Darstellung",

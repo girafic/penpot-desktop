@@ -27,7 +27,17 @@
     "group": "Agrupar",
     "ungroup": "Desagrupar",
     "create-component": "Criar componente",
-    "detach-component": "Desanexar componente"
+    "create-variant": "Criar variante",
+    "detach-component": "Desanexar componente",
+    "detach-instance": "Desanexar instância",
+    "rename": "Renomear",
+    "selection-to-board": "Seleção para quadro",
+    "focus-on": "Focar em",
+    "toggle-visibility": "Ocultar / Mostrar",
+    "toggle-lock": "Bloquear / Desbloquear",
+    "set-thumbnail": "Definir como miniatura",
+    "show-in-assets": "Mostrar no painel de recursos",
+    "focus-off": "Desfocar"
   },
   "view": {
     "view": "Visualizar",

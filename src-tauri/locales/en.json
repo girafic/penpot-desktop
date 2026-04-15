@@ -27,7 +27,17 @@
     "group": "Group",
     "ungroup": "Ungroup",
     "create-component": "Create Component",
-    "detach-component": "Detach Component"
+    "create-variant": "Create Variant",
+    "detach-component": "Detach Component",
+    "detach-instance": "Detach Instance",
+    "rename": "Rename",
+    "selection-to-board": "Selection to Board",
+    "focus-on": "Focus On",
+    "focus-off": "Focus Off",
+    "toggle-visibility": "Hide / Show",
+    "toggle-lock": "Lock / Unlock",
+    "set-thumbnail": "Set as Thumbnail",
+    "show-in-assets": "Show in Assets Panel"
   },
   "view": {
     "view": "View",

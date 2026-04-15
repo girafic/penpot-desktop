@@ -27,7 +27,17 @@
     "group": "编组",
     "ungroup": "取消编组",
     "create-component": "创建组件",
-    "detach-component": "分离组件"
+    "create-variant": "创建变体",
+    "detach-component": "分离组件",
+    "detach-instance": "分离实例",
+    "rename": "重命名",
+    "selection-to-board": "选择到画板",
+    "focus-on": "聚焦",
+    "toggle-visibility": "隐藏 / 显示",
+    "toggle-lock": "锁定 / 解锁",
+    "set-thumbnail": "设为缩略图",
+    "show-in-assets": "在资产面板中显示",
+    "focus-off": "取消聚焦"
   },
   "view": {
     "view": "视图",

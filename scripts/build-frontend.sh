@@ -140,32 +140,48 @@ build_frontend() {
     STORE_CLJS="$FRONTEND_DIR/src/app/main/store.cljs"
     if ! grep -q "desktop-selection" "$STORE_CLJS" 2>/dev/null; then
         info "Patching store.cljs with desktop selection bridge..."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' '/::ongoing-tasks/,/(constantly false)))/{ /(constantly false)))/a\
-\
-;; Desktop selection bridge — calls JS callback when selection changes\
-(add-watch state ::desktop-selection\
-  (fn [_ _ old-state new-state]\
-    (let [old-sel (get-in old-state [:workspace-local :selected])\
-          new-sel (get-in new-state [:workspace-local :selected])]\
-      (when (not= old-sel new-sel)\
-        (when-let [cb (obj/get js/window "__penpotDesktopOnSelection")]\
-          (cb (count new-sel)))))))\
+        # The patch is complex — use a heredoc approach instead of sed
+        PATCH_CODE='
+;; Desktop selection bridge — calls JS callback when selection changes
+(add-watch state ::desktop-selection
+  (fn [_ _ old-state new-state]
+    (let [old-sel    (get-in old-state [:workspace-local :selected])
+          new-sel    (get-in new-state [:workspace-local :selected])
+          old-focus  (:workspace-focus-selected old-state)
+          new-focus  (:workspace-focus-selected new-state)]
+      (when (or (not= old-sel new-sel)
+                (not= old-focus new-focus))
+        (when-let [cb (obj/get js/window "__penpotDesktopOnSelection")]
+          (let [objects (when (seq new-sel)
+                          (let [file-id (:current-file-id new-state)
+                                page-id (:current-page-id new-state)]
+                            (get-in new-state [:files file-id :data :pages-index page-id :objects])))
+                shapes (when objects (keep #(get objects %) new-sel))
+                types  (when shapes
+                         (->> shapes (keep #(some-> (:type %) name)) distinct vec))
+                flags  (cond-> []
+                          (some #(true? (:main-instance %)) (or shapes []))
+                          (conj "component")
+                          (some #(and (some? (:component-root %))
+                                      (some? (:shape-ref %))
+                                      (not (:main-instance %))) (or shapes []))
+                          (conj "instance")
+                          (seq new-focus)
+                          (conj "focused"))]
+            (cb (count new-sel)
+                (clj->js (or types []))
+                (clj->js flags))))))))'
 
-}' "$STORE_CLJS"
+        # Find the line number of the closing paren of the ongoing-tasks watcher
+        INSERT_LINE=$(grep -n "(constantly false)))" "$STORE_CLJS" | head -1 | cut -d: -f1)
+        if [ -n "$INSERT_LINE" ]; then
+            # Insert patch code after that line
+            head -n "$INSERT_LINE" "$STORE_CLJS" > "${STORE_CLJS}.tmp"
+            echo "$PATCH_CODE" >> "${STORE_CLJS}.tmp"
+            tail -n +"$((INSERT_LINE + 1))" "$STORE_CLJS" >> "${STORE_CLJS}.tmp"
+            mv "${STORE_CLJS}.tmp" "$STORE_CLJS"
         else
-            sed -i '/::ongoing-tasks/,/(constantly false)))/{ /(constantly false)))/a\
-\
-;; Desktop selection bridge — calls JS callback when selection changes\
-(add-watch state ::desktop-selection\
-  (fn [_ _ old-state new-state]\
-    (let [old-sel (get-in old-state [:workspace-local :selected])\
-          new-sel (get-in new-state [:workspace-local :selected])]\
-      (when (not= old-sel new-sel)\
-        (when-let [cb (obj/get js/window "__penpotDesktopOnSelection")]\
-          (cb (count new-sel)))))))\
-
-}' "$STORE_CLJS"
+            warn "Could not find insertion point in store.cljs"
         fi
         ok "store.cljs patched."
     else

@@ -27,7 +27,17 @@
     "group": "تجميع",
     "ungroup": "إلغاء التجميع",
     "create-component": "إنشاء مكوّن",
-    "detach-component": "فصل المكوّن"
+    "create-variant": "إنشاء متغيّر",
+    "detach-component": "فصل المكوّن",
+    "detach-instance": "فصل النسخة",
+    "rename": "إعادة تسمية",
+    "selection-to-board": "التحديد إلى لوحة",
+    "focus-on": "التركيز على",
+    "toggle-visibility": "إخفاء / إظهار",
+    "toggle-lock": "قفل / فتح",
+    "set-thumbnail": "تعيين كصورة مصغرة",
+    "show-in-assets": "إظهار في لوحة الأصول",
+    "focus-off": "إيقاف التركيز"
   },
   "view": {
     "view": "عرض",

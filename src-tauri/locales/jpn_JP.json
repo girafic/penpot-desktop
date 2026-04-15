@@ -27,7 +27,17 @@
     "group": "グループ化",
     "ungroup": "グループ解除",
     "create-component": "コンポーネント作成",
-    "detach-component": "コンポーネント切り離し"
+    "create-variant": "バリアント作成",
+    "detach-component": "コンポーネント切り離し",
+    "detach-instance": "インスタンス切り離し",
+    "rename": "名前変更",
+    "selection-to-board": "選択をボードへ",
+    "focus-on": "フォーカス",
+    "toggle-visibility": "表示 / 非表示",
+    "toggle-lock": "ロック / アンロック",
+    "set-thumbnail": "サムネイルに設定",
+    "show-in-assets": "アセットパネルに表示",
+    "focus-off": "フォーカス解除"
   },
   "view": {
     "view": "表示",

@@ -27,7 +27,17 @@
     "group": "Grupuj",
     "ungroup": "Rozgrupuj",
     "create-component": "Utwórz komponent",
-    "detach-component": "Odłącz komponent"
+    "create-variant": "Utwórz wariant",
+    "detach-component": "Odłącz komponent",
+    "detach-instance": "Odłącz instancję",
+    "rename": "Zmień nazwę",
+    "selection-to-board": "Zaznaczenie na tablicę",
+    "focus-on": "Fokus na",
+    "toggle-visibility": "Ukryj / Pokaż",
+    "toggle-lock": "Zablokuj / Odblokuj",
+    "set-thumbnail": "Ustaw jako miniaturę",
+    "show-in-assets": "Pokaż w panelu zasobów",
+    "focus-off": "Wyłącz fokus"
   },
   "view": {
     "view": "Widok",

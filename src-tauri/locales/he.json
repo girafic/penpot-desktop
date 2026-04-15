@@ -27,7 +27,17 @@
     "group": "קבוצה",
     "ungroup": "ביטול קבוצה",
     "create-component": "צור רכיב",
-    "detach-component": "נתק רכיב"
+    "create-variant": "צור גרסה",
+    "detach-component": "נתק רכיב",
+    "detach-instance": "נתק מופע",
+    "rename": "שנה שם",
+    "selection-to-board": "בחירה ללוח",
+    "focus-on": "מיקוד",
+    "toggle-visibility": "הסתר / הצג",
+    "toggle-lock": "נעל / שחרר",
+    "set-thumbnail": "הגדר כתמונה ממוזערת",
+    "show-in-assets": "הצג בלוח הנכסים",
+    "focus-off": "בטל מיקוד"
   },
   "view": {
     "view": "תצוגה",

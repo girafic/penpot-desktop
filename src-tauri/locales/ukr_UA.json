@@ -27,7 +27,17 @@
     "group": "Групувати",
     "ungroup": "Розгрупувати",
     "create-component": "Створити компонент",
-    "detach-component": "Від'єднати компонент"
+    "create-variant": "Створити варіант",
+    "detach-component": "Від'єднати компонент",
+    "detach-instance": "Від'єднати екземпляр",
+    "rename": "Перейменувати",
+    "selection-to-board": "Виділення на дошку",
+    "focus-on": "Фокус на",
+    "toggle-visibility": "Сховати / Показати",
+    "toggle-lock": "Заблокувати / Розблокувати",
+    "set-thumbnail": "Встановити як мініатюру",
+    "show-in-assets": "Показати в панелі ресурсів",
+    "focus-off": "Вимкнути фокус"
   },
   "view": {
     "view": "Вигляд",

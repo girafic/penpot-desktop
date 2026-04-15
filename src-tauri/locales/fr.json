@@ -27,7 +27,17 @@
     "group": "Grouper",
     "ungroup": "Dégrouper",
     "create-component": "Créer un composant",
-    "detach-component": "Détacher le composant"
+    "create-variant": "Créer une variante",
+    "detach-component": "Détacher le composant",
+    "detach-instance": "Détacher l'instance",
+    "rename": "Renommer",
+    "selection-to-board": "Sélection vers cadre",
+    "focus-on": "Focaliser",
+    "toggle-visibility": "Masquer / Afficher",
+    "toggle-lock": "Verrouiller / Déverrouiller",
+    "set-thumbnail": "Définir comme miniature",
+    "show-in-assets": "Afficher dans le panneau des actifs",
+    "focus-off": "Désactiver le focus"
   },
   "view": {
     "view": "Affichage",

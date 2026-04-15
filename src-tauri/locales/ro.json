@@ -27,7 +27,17 @@
     "group": "Grupează",
     "ungroup": "Degrupează",
     "create-component": "Creează component",
-    "detach-component": "Detaşează component"
+    "create-variant": "Creează variantă",
+    "detach-component": "Detaşează component",
+    "detach-instance": "Detaşează instanţă",
+    "rename": "Redenumire",
+    "selection-to-board": "Selecţie pe panou",
+    "focus-on": "Focalizare",
+    "toggle-visibility": "Ascunde / Arată",
+    "toggle-lock": "Blochează / Deblochează",
+    "set-thumbnail": "Setează ca miniatură",
+    "show-in-assets": "Arată în panoul de resurse",
+    "focus-off": "Dezactivare focalizare"
   },
   "view": {
     "view": "Vizualizare",
