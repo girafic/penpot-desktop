@@ -428,14 +428,18 @@ pub const DESKTOP_CONFIG_JS: &str = r#"// Penpot Desktop runtime config
 
   window.__penpotKey = function(shortcut) {
     var parts = shortcut.split('+');
+    var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
+    var hasMeta = parts.includes('meta');
     // Handle bare "+" key: split('+') gives ["",""], so last part is ""
     var key = parts[parts.length - 1] || '+';
     var code = KEY_CODES[key] || key.charCodeAt(0);
     var opts = {
       bubbles: true,
       cancelable: true,
-      metaKey: parts.includes('meta'),
-      ctrlKey: parts.includes('ctrl'),
+      // Keep this bridge resilient if callers still send `meta+...` on
+      // non-macOS: treat it as ctrl there so Penpot receives the expected mod.
+      metaKey: hasMeta && isMac,
+      ctrlKey: parts.includes('ctrl') || (hasMeta && !isMac),
       shiftKey: parts.includes('shift'),
       altKey: parts.includes('alt'),
       keyCode: code,

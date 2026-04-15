@@ -1,7 +1,7 @@
-use tauri::Manager;
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder, PredefinedMenuItem, MenuItemKind};
 use crate::i18n;
 use crate::state::{APP_HANDLE, CURRENT_LANG};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder};
+use tauri::Manager;
 
 // ── macOS Help-menu registration ─────────────────────────
 
@@ -25,23 +25,43 @@ pub fn register_help_menu() {
 
 /// IDs of menu items that require a selection in the workspace.
 pub(crate) const SELECTION_ITEMS: &[&str] = &[
-    "duplicate", "delete",
-    "group", "ungroup",
-    "create-component", "detach-component",
-    "bool-union", "bool-difference", "bool-intersection", "bool-exclude",
-    "flip-h", "flip-v",
-    "bring-forward", "bring-front", "send-backward", "send-back",
-    "align-left", "align-hcenter", "align-right",
-    "align-top", "align-vcenter", "align-bottom",
-    "dist-h", "dist-v",
-    "add-flex", "add-grid",
-    "rename", "selection-to-board",
-    "focus-on", "toggle-visibility", "toggle-lock",
+    "duplicate",
+    "delete",
+    "group",
+    "ungroup",
+    "create-component",
+    "detach-component",
+    "bool-union",
+    "bool-difference",
+    "bool-intersection",
+    "bool-exclude",
+    "flip-h",
+    "flip-v",
+    "bring-forward",
+    "bring-front",
+    "send-backward",
+    "send-back",
+    "align-left",
+    "align-hcenter",
+    "align-right",
+    "align-top",
+    "align-vcenter",
+    "align-bottom",
+    "dist-h",
+    "dist-v",
+    "add-flex",
+    "add-grid",
+    "rename",
+    "selection-to-board",
+    "focus-on",
+    "toggle-visibility",
+    "toggle-lock",
     "set-thumbnail",
 ];
 
 /// Shape types that support boolean operations.
-pub(crate) const BOOL_ELIGIBLE_TYPES: &[&str] = &["rect", "circle", "path", "bool", "image", "svg-raw"];
+pub(crate) const BOOL_ELIGIBLE_TYPES: &[&str] =
+    &["rect", "circle", "path", "bool", "image", "svg-raw"];
 
 /// Shape types that can be ungrouped.
 pub(crate) const UNGROUP_ELIGIBLE_TYPES: &[&str] = &["group", "bool", "frame"];
@@ -63,14 +83,20 @@ fn is_item_enabled(id: &str, count: u64, types: &[String], flags: &[String]) -> 
     match id {
         // Boolean operations: need 2+ shapes, all must be geometric
         "bool-union" | "bool-difference" | "bool-intersection" | "bool-exclude" => {
-            count >= 2 && types.iter().all(|t| BOOL_ELIGIBLE_TYPES.contains(&t.as_str()))
+            count >= 2
+                && types
+                    .iter()
+                    .all(|t| BOOL_ELIGIBLE_TYPES.contains(&t.as_str()))
         }
         // Group: enabled whenever anything is selected (Penpot allows grouping a single object)
         "group" => true,
         // Ungroup: only for plain groups or bools, not components/instances
         "ungroup" => {
-            !is_component && !is_instance
-                && types.iter().any(|t| UNGROUP_ELIGIBLE_TYPES.contains(&t.as_str()))
+            !is_component
+                && !is_instance
+                && types
+                    .iter()
+                    .any(|t| UNGROUP_ELIGIBLE_TYPES.contains(&t.as_str()))
         }
         // Detach: only for instances (copies), not main components
         "detach-component" => is_instance && !is_component,
@@ -90,7 +116,13 @@ pub fn current_lang() -> String {
 }
 
 /// Update a menu item's label and enabled state based on selection.
-pub fn update_menu_item<R: tauri::Runtime>(mi: &tauri::menu::MenuItem<R>, count: u64, types: &[String], flags: &[String], lang: &str) {
+pub fn update_menu_item<R: tauri::Runtime>(
+    mi: &tauri::menu::MenuItem<R>,
+    count: u64,
+    types: &[String],
+    flags: &[String],
+    lang: &str,
+) {
     let id = &mi.id().0;
     if !SELECTION_ITEMS.contains(&id.as_str()) {
         return;
@@ -103,17 +135,29 @@ pub fn update_menu_item<R: tauri::Runtime>(mi: &tauri::menu::MenuItem<R>, count:
     let is_focused = flags.iter().any(|f| f == "focused");
     match id.as_str() {
         "create-component" => {
-            let key = if is_component { "edit.create-variant" } else { "edit.create-component" };
-            let label = format!("{}\t\t{}", i18n::t(lang, key), prettify_shortcut("Cmd+K"));
+            let key = if is_component {
+                "edit.create-variant"
+            } else {
+                "edit.create-component"
+            };
+            let label = i18n::t(lang, key);
             let _ = mi.set_text(label);
         }
         "detach-component" => {
-            let key = if is_instance { "edit.detach-instance" } else { "edit.detach-component" };
-            let label = format!("{}\t\t{}", i18n::t(lang, key), prettify_shortcut("Cmd+Shift+K"));
+            let key = if is_instance {
+                "edit.detach-instance"
+            } else {
+                "edit.detach-component"
+            };
+            let label = i18n::t(lang, key);
             let _ = mi.set_text(label);
         }
         "focus-on" => {
-            let key = if is_focused { "edit.focus-off" } else { "edit.focus-on" };
+            let key = if is_focused {
+                "edit.focus-off"
+            } else {
+                "edit.focus-on"
+            };
             let label = format!("{}\t\t{}", i18n::t(lang, key), prettify_shortcut("F"));
             let _ = mi.set_text(label);
         }
@@ -121,7 +165,12 @@ pub fn update_menu_item<R: tauri::Runtime>(mi: &tauri::menu::MenuItem<R>, count:
     }
 }
 
-pub fn update_selection_items(app: &tauri::AppHandle, count: u64, types: &[String], flags: &[String]) {
+pub fn update_selection_items(
+    app: &tauri::AppHandle,
+    count: u64,
+    types: &[String],
+    flags: &[String],
+) {
     let lang = current_lang();
     if let Some(menu) = app.menu() {
         // Menu.get() doesn't search submenus, so iterate through them
@@ -176,6 +225,10 @@ fn prettify_shortcut(raw: &str) -> String {
     raw.to_string()
 }
 
+fn strip_shortcut_hint(label: &str) -> &str {
+    label.split("\t\t").next().unwrap_or(label)
+}
+
 // ── Menu Builder ────────────────────────────────────────────
 
 pub fn build_menu(
@@ -195,8 +248,10 @@ pub fn build_menu(
         .and_then(|c| c.try_read().ok().map(|c| c.language.clone()))
         .unwrap_or_else(|| "en".to_string());
     let t = |key: &str| i18n::t(&lang, key);
-    // Translated label with shortcut hint: d("key", "Cmd+X") → "Translated\t\tCmd+X"
-    // Double-tab ensures the hint stays right-aligned even for short labels.
+    // Translated label with optional shortcut hint:
+    // d("key", "Cmd+X") → "Translated\t\tCmd+X"
+    // For menu items with real native accelerators, the macro strips the hint
+    // so the shortcut is only shown once by the platform menu renderer.
     let d = |key: &str, shortcut: &str| format!("{}\t\t{}", t(key), prettify_shortcut(shortcut));
     use tauri::menu::AboutMetadata;
 
@@ -206,7 +261,9 @@ pub fn build_menu(
         copyright: Some("© 2026 Penpot Desktop".into()),
         website: Some("https://penpot.app".into()),
         website_label: Some("penpot.app".into()),
-        icon: Some(tauri::image::Image::from_bytes(include_bytes!("../icons/128x128@2x.png"))?),
+        icon: Some(tauri::image::Image::from_bytes(include_bytes!(
+            "../icons/128x128@2x.png"
+        ))?),
         ..Default::default()
     };
 
@@ -215,7 +272,7 @@ pub fn build_menu(
             MenuItemBuilder::with_id($id, &$label.replace('&', "&&")).build($app)?
         };
         ($app:expr, $id:expr, $label:expr, $accel:expr) => {
-            MenuItemBuilder::with_id($id, &$label.replace('&', "&&"))
+            MenuItemBuilder::with_id($id, &strip_shortcut_hint(&$label).replace('&', "&&"))
                 .accelerator($accel)
                 .build($app)?
         };
@@ -247,55 +304,75 @@ pub fn build_menu(
         .build()?;
 
     // ── Edit (always) ──
-    // All display-only so the WebView receives keyboard events for Penpot's handlers.
-    // A JS capture-phase listener in DESKTOP_CONFIG_JS handles Cmd+C/X/V/A in input fields.
+    // Native accelerators trigger menu events; main.rs forwards those events
+    // back into Penpot's shortcut handler via window.__penpotKey(...).
     let mut edit = SubmenuBuilder::new(app, &t("edit.edit"))
-        .item(&mi!(app, "undo", d("edit.undo", "Cmd+Z")))
-        .item(&mi!(app, "redo", d("edit.redo", "Cmd+Shift+Z")))
+        .item(&mi!(app, "undo", d("edit.undo", "Cmd+Z"), "CmdOrCtrl+Z"))
+        .item(&mi!(
+            app,
+            "redo",
+            d("edit.redo", "Cmd+Shift+Z"),
+            "CmdOrCtrl+Shift+Z"
+        ))
         .separator()
-        .item(&mi!(app, "cut", d("edit.cut", "Cmd+X")))
-        .item(&mi!(app, "copy", d("edit.copy", "Cmd+C")))
-        .item(&mi!(app, "paste", d("edit.paste", "Cmd+V")))
+        .item(&mi!(app, "cut", d("edit.cut", "Cmd+X"), "CmdOrCtrl+X"))
+        .item(&mi!(app, "copy", d("edit.copy", "Cmd+C"), "CmdOrCtrl+C"))
+        .item(&mi!(app, "paste", d("edit.paste", "Cmd+V"), "CmdOrCtrl+V"))
         .separator()
-        .item(&mi!(app, "select-all", d("edit.select-all", "Cmd+A")));
+        .item(&mi!(
+            app,
+            "select-all",
+            d("edit.select-all", "Cmd+A"),
+            "CmdOrCtrl+A"
+        ));
 
     if mode == "workspace" {
         edit = edit
             .separator()
-            .item(&mi!(app, "duplicate", d("edit.duplicate", "Cmd+D")))
+            .item(&mi!(
+                app,
+                "duplicate",
+                d("edit.duplicate", "Cmd+D"),
+                "CmdOrCtrl+D"
+            ))
             .item(&mi!(app, "delete", d("edit.delete", "Backspace")))
             .separator()
-            .item(&mi!(app, "group", d("edit.group", "Cmd+G")))
+            .item(&mi!(app, "group", d("edit.group", "Cmd+G"), "CmdOrCtrl+G"))
             .item(&mi!(app, "ungroup", d("edit.ungroup", "Shift+G")))
             .separator()
             .item(&mi!(
                 app,
                 "create-component",
-                d("edit.create-component", "Cmd+K")
+                d("edit.create-component", "Cmd+K"),
+                "CmdOrCtrl+K"
             ))
             .item(&mi!(
                 app,
                 "detach-component",
-                d("edit.detach-component", "Cmd+Shift+K")
+                d("edit.detach-component", "Cmd+Shift+K"),
+                "CmdOrCtrl+Shift+K"
             ))
             .separator()
             .item(&mi!(app, "rename", d("edit.rename", "Alt+N")))
             .item(&mi!(
                 app,
                 "selection-to-board",
-                d("edit.selection-to-board", "Cmd+Alt+G")
+                d("edit.selection-to-board", "Cmd+Alt+G"),
+                "CmdOrCtrl+Alt+G"
             ))
             .separator()
             .item(&mi!(app, "focus-on", d("edit.focus-on", "F")))
             .item(&mi!(
                 app,
                 "toggle-visibility",
-                d("edit.toggle-visibility", "Cmd+Shift+H")
+                d("edit.toggle-visibility", "Cmd+Shift+H"),
+                "CmdOrCtrl+Shift+H"
             ))
             .item(&mi!(
                 app,
                 "toggle-lock",
-                d("edit.toggle-lock", "Cmd+Shift+L")
+                d("edit.toggle-lock", "Cmd+Shift+L"),
+                "CmdOrCtrl+Shift+L"
             ))
             .separator()
             .item(&mi!(
@@ -313,32 +390,74 @@ pub fn build_menu(
         let zoom_submenu = SubmenuBuilder::new(app, &t("view.zoom"))
             .item(&mi!(app, "zoom-in", d("view.zoom-in", "+")))
             .item(&mi!(app, "zoom-out", d("view.zoom-out", "\u{2212}")))
-            .item(&mi!(app, "zoom-reset", d("view.zoom-reset", "Shift+0")))
-            .item(&mi!(app, "zoom-fit", d("view.zoom-fit", "Shift+1")))
+            .item(&mi!(
+                app,
+                "zoom-reset",
+                d("view.zoom-reset", "Shift+0"),
+                "Shift+0"
+            ))
+            .item(&mi!(
+                app,
+                "zoom-fit",
+                d("view.zoom-fit", "Shift+1"),
+                "Shift+1"
+            ))
             .item(&mi!(
                 app,
                 "zoom-selected",
-                d("view.zoom-selected", "Shift+2")
+                d("view.zoom-selected", "Shift+2"),
+                "Shift+2"
             ))
             .build()?;
 
         let panels_submenu = SubmenuBuilder::new(app, &t("view.panels"))
-            .item(&mi!(app, "toggle-layers", d("view.layers", "Alt+L")))
-            .item(&mi!(app, "toggle-assets", d("view.assets", "Alt+I")))
+            .item(&mi!(
+                app,
+                "toggle-layers",
+                d("view.layers", "Alt+L"),
+                "Alt+L"
+            ))
+            .item(&mi!(
+                app,
+                "toggle-assets",
+                d("view.assets", "Alt+I"),
+                "Alt+I"
+            ))
             .item(&mi!(
                 app,
                 "toggle-palette",
-                d("view.color-palette", "Alt+P")
+                d("view.color-palette", "Alt+P"),
+                "Alt+P"
             ))
-            .item(&mi!(app, "toggle-history", d("view.history", "Cmd+Alt+H")))
+            .item(&mi!(
+                app,
+                "toggle-history",
+                d("view.history", "Cmd+Alt+H"),
+                "CmdOrCtrl+Alt+H"
+            ))
             .build()?;
 
         view = view
             .item(&zoom_submenu)
             .separator()
-            .item(&mi!(app, "toggle-rulers", d("view.rulers", "Cmd+Shift+R")))
-            .item(&mi!(app, "toggle-guides", d("view.guides", "Cmd+'")))
-            .item(&mi!(app, "toggle-grid", d("view.pixel-grid", "Shift+,")))
+            .item(&mi!(
+                app,
+                "toggle-rulers",
+                d("view.rulers", "Cmd+Shift+R"),
+                "CmdOrCtrl+Shift+R"
+            ))
+            .item(&mi!(
+                app,
+                "toggle-guides",
+                d("view.guides", "Cmd+'"),
+                "CmdOrCtrl+'"
+            ))
+            .item(&mi!(
+                app,
+                "toggle-grid",
+                d("view.pixel-grid", "Shift+,"),
+                "Shift+Comma"
+            ))
             .separator()
             .item(&panels_submenu)
             .item(&mi!(app, "hide-ui", d("view.hide-ui", "\\")))
@@ -394,7 +513,12 @@ pub fn build_menu(
         let go_submenu = SubmenuBuilder::new(app, &t("go.go"))
             .item(&mi!(app, "go-drafts", d("go.drafts", "G D")))
             .item(&mi!(app, "go-libs", d("go.libraries", "G L")))
-            .item(&mi!(app, "go-search", d("go.search", "Cmd+F")))
+            .item(&mi!(
+                app,
+                "go-search",
+                d("go.search", "Cmd+F"),
+                "CmdOrCtrl+F"
+            ))
             .build()?;
 
         menu_builder = menu_builder
@@ -429,38 +553,54 @@ pub fn build_menu(
             .item(&mi!(
                 app,
                 "bring-forward",
-                d("shape.bring-forward", "Cmd+\u{2191}")
+                d("shape.bring-forward", "Cmd+\u{2191}"),
+                "CmdOrCtrl+Up"
             ))
             .item(&mi!(
                 app,
                 "bring-front",
-                d("shape.bring-front", "Cmd+Shift+\u{2191}")
+                d("shape.bring-front", "Cmd+Shift+\u{2191}"),
+                "CmdOrCtrl+Shift+Up"
             ))
             .item(&mi!(
                 app,
                 "send-backward",
-                d("shape.send-backward", "Cmd+\u{2193}")
+                d("shape.send-backward", "Cmd+\u{2193}"),
+                "CmdOrCtrl+Down"
             ))
             .item(&mi!(
                 app,
                 "send-back",
-                d("shape.send-back", "Cmd+Shift+\u{2193}")
+                d("shape.send-back", "Cmd+Shift+\u{2193}"),
+                "CmdOrCtrl+Shift+Down"
             ))
             .build()?;
 
         let bool_submenu = SubmenuBuilder::new(app, &t("shape.boolean"))
-            .item(&mi!(app, "bool-union", d("shape.union", "Cmd+Alt+U")))
+            .item(&mi!(
+                app,
+                "bool-union",
+                d("shape.union", "Cmd+Alt+U"),
+                "CmdOrCtrl+Alt+U"
+            ))
             .item(&mi!(
                 app,
                 "bool-difference",
-                d("shape.difference", "Cmd+Alt+D")
+                d("shape.difference", "Cmd+Alt+D"),
+                "CmdOrCtrl+Alt+D"
             ))
             .item(&mi!(
                 app,
                 "bool-intersection",
-                d("shape.intersection", "Cmd+Alt+I")
+                d("shape.intersection", "Cmd+Alt+I"),
+                "CmdOrCtrl+Alt+I"
             ))
-            .item(&mi!(app, "bool-exclude", d("shape.exclude", "Cmd+Alt+E")))
+            .item(&mi!(
+                app,
+                "bool-exclude",
+                d("shape.exclude", "Cmd+Alt+E"),
+                "CmdOrCtrl+Alt+E"
+            ))
             .build()?;
 
         let shape_submenu = SubmenuBuilder::new(app, &t("shape.shape"))
@@ -480,27 +620,60 @@ pub fn build_menu(
             .item(&mi!(
                 app,
                 "toggle-layout-grid",
-                d("shape.grid-layout", "Cmd+Shift+A")
+                d("shape.grid-layout", "Cmd+Shift+A"),
+                "CmdOrCtrl+Shift+A"
             ))
             .separator()
-            .item(&mi!(app, "align-left", d("shape.align-left", "Alt+A")))
+            .item(&mi!(
+                app,
+                "align-left",
+                d("shape.align-left", "Alt+A"),
+                "Alt+A"
+            ))
             .item(&mi!(
                 app,
                 "align-hcenter",
-                d("shape.align-hcenter", "Alt+H")
+                d("shape.align-hcenter", "Alt+H"),
+                "Alt+H"
             ))
-            .item(&mi!(app, "align-right", d("shape.align-right", "Alt+D")))
+            .item(&mi!(
+                app,
+                "align-right",
+                d("shape.align-right", "Alt+D"),
+                "Alt+D"
+            ))
             .separator()
-            .item(&mi!(app, "align-top", d("shape.align-top", "Alt+W")))
+            .item(&mi!(
+                app,
+                "align-top",
+                d("shape.align-top", "Alt+W"),
+                "Alt+W"
+            ))
             .item(&mi!(
                 app,
                 "align-vcenter",
-                d("shape.align-vcenter", "Alt+V")
+                d("shape.align-vcenter", "Alt+V"),
+                "Alt+V"
             ))
-            .item(&mi!(app, "align-bottom", d("shape.align-bottom", "Alt+S")))
+            .item(&mi!(
+                app,
+                "align-bottom",
+                d("shape.align-bottom", "Alt+S"),
+                "Alt+S"
+            ))
             .separator()
-            .item(&mi!(app, "dist-h", t("shape.dist-h")))
-            .item(&mi!(app, "dist-v", t("shape.dist-v")))
+            .item(&mi!(
+                app,
+                "dist-h",
+                d("shape.dist-h", "Cmd+Shift+Alt+H"),
+                "CmdOrCtrl+Shift+Alt+H"
+            ))
+            .item(&mi!(
+                app,
+                "dist-v",
+                d("shape.dist-v", "Cmd+Shift+Alt+V"),
+                "CmdOrCtrl+Shift+Alt+V"
+            ))
             .build()?;
 
         // ── Go (workspace) ──

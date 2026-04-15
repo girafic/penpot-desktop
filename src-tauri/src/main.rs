@@ -2,32 +2,47 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-mod i18n;
 mod config;
+mod i18n;
 mod proxy;
 
-use config::{SharedConfig, load_config, save_config};
+use config::{load_config, save_config, SharedConfig};
 use tauri::Manager;
 use tokio::sync::RwLock;
 
 use proxy::start_proxy;
 
 mod state;
-use state::{
-    APP_HANDLE, CURRENT_LANG, TAB_URLS, WINDOW_MODES,
-    get_window_mode, forget_window_mode, untrack_tab,
-};
 #[cfg(target_os = "macos")]
 use state::get_all_tab_groups;
+use state::{
+    forget_window_mode, get_window_mode, untrack_tab, APP_HANDLE, CURRENT_LANG, TAB_URLS,
+    WINDOW_MODES,
+};
 
 mod windows;
-use windows::{create_tab_window, create_standalone_window, safari_user_agent};
+use windows::{create_standalone_window, create_tab_window, safari_user_agent};
 
 mod menu;
-use menu::{build_menu, update_selection_items, register_help_menu};
+use menu::{build_menu, register_help_menu, update_selection_items};
 
 mod commands;
-use commands::{save_download, get_proxy_url};
+use commands::{get_proxy_url, save_download};
+
+fn normalize_shortcut_for_platform(shortcut: &str, is_macos: bool) -> String {
+    if is_macos {
+        return shortcut.to_string();
+    }
+    shortcut
+        .split('+')
+        .map(|part| if part == "meta" { "ctrl" } else { part })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn platform_shortcut(shortcut: &str) -> String {
+    normalize_shortcut_for_platform(shortcut, cfg!(target_os = "macos"))
+}
 
 // ── Main ─────────────────────────────────────────────────────
 
@@ -373,6 +388,9 @@ pub fn run() {
                     _ => return,
                 };
 
+                // Normalize `meta` to `ctrl` on non-macOS so Penpot receives
+                // the expected modifier in its platform-specific shortcuts.
+                let shortcut = platform_shortcut(shortcut);
                 // Simulate keyboard event with proper keyCode for Mousetrap.
                 // Escape backslash and single-quote so shortcuts containing them
                 // (e.g. "meta+'" for guides, "\\" for hide-ui) don't break the JS literal.
@@ -614,6 +632,32 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_shortcut_for_platform;
+
+    #[test]
+    fn keeps_meta_on_macos() {
+        assert_eq!(
+            normalize_shortcut_for_platform("meta+shift+z", true),
+            "meta+shift+z"
+        );
+    }
+
+    #[test]
+    fn rewrites_meta_to_ctrl_on_non_macos() {
+        assert_eq!(
+            normalize_shortcut_for_platform("meta+shift+z", false),
+            "ctrl+shift+z"
+        );
+    }
+
+    #[test]
+    fn keeps_plus_shortcut_stable() {
+        assert_eq!(normalize_shortcut_for_platform("+", false), "+");
+    }
 }
 
 fn main() {

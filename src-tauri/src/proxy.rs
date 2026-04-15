@@ -10,14 +10,13 @@ use tokio::sync::Mutex;
 use warp::Filter;
 
 use crate::config::{
-    SharedConfig, IFRAME_SHIM_JS, DESKTOP_CONFIG_JS, desktop_to_penpot_locale, save_config,
+    desktop_to_penpot_locale, save_config, SharedConfig, DESKTOP_CONFIG_JS, IFRAME_SHIM_JS,
 };
-use crate::state::{
-    APP_HANDLE, CURRENT_LANG, TAB_URLS, WINDOW_MODES,
-    set_window_mode, get_window_mode, focused_window_mode, track_tab_url,
-};
-use crate::menu::{build_menu, update_selection_items, register_help_menu};
 use crate::i18n;
+use crate::menu::{build_menu, register_help_menu, update_selection_items};
+use crate::state::{
+    focused_window_mode, get_window_mode, set_window_mode, track_tab_url, APP_HANDLE, CURRENT_LANG,
+};
 use crate::windows::create_tab_window;
 
 // ── Error deduplication ─────────────────────────────────────
@@ -290,10 +289,13 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
     let get_clipboard = warp::path!("__penpot_desktop" / "clipboard")
         .and(warp::get())
         .and_then(move || async move {
-            let text = APP_HANDLE.get().and_then(|app| {
-                use tauri_plugin_clipboard_manager::ClipboardExt;
-                app.clipboard().read_text().ok()
-            }).unwrap_or_default();
+            let text = APP_HANDLE
+                .get()
+                .and_then(|app| {
+                    use tauri_plugin_clipboard_manager::ClipboardExt;
+                    app.clipboard().read_text().ok()
+                })
+                .unwrap_or_default();
             Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"text": text})))
         });
 
@@ -303,13 +305,23 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         .and(warp::body::json())
         .and_then(move |body: serde_json::Value| async move {
             let count = body.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-            let types: Vec<String> = body.get("types")
+            let types: Vec<String> = body
+                .get("types")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            let flags: Vec<String> = body.get("flags")
+            let flags: Vec<String> = body
+                .get("flags")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Some(app) = APP_HANDLE.get() {
                 let _ = app.run_on_main_thread(move || {
@@ -959,8 +971,7 @@ async fn proxy_request_inner(
                     .map(|d| d.trim())
                     .filter(|d| {
                         let lower = d.to_lowercase();
-                        !lower.starts_with("frame-ancestors")
-                            && !lower.starts_with("frame-src")
+                        !lower.starts_with("frame-ancestors") && !lower.starts_with("frame-src")
                     })
                     .collect::<Vec<_>>()
                     .join("; ");

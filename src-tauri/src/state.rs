@@ -125,14 +125,17 @@ pub fn get_all_tab_groups(app: &tauri::AppHandle) -> Vec<Vec<String>> {
         if seen.contains(label) {
             continue;
         }
-        let Some(win) = app.get_webview_window(label) else { continue };
-        let Ok(ns_ptr) = win.ns_window() else { continue };
+        let Some(win) = app.get_webview_window(label) else {
+            continue;
+        };
+        let Ok(ns_ptr) = win.ns_window() else {
+            continue;
+        };
         let ns: *mut objc2::runtime::AnyObject = ns_ptr.cast();
 
         let mut group: Vec<String> = Vec::new();
         unsafe {
-            let tabbed: *mut objc2::runtime::AnyObject =
-                objc2::msg_send![ns, tabbedWindows];
+            let tabbed: *mut objc2::runtime::AnyObject = objc2::msg_send![ns, tabbedWindows];
             if !tabbed.is_null() {
                 let count: usize = objc2::msg_send![tabbed, count];
                 for i in 0..count {

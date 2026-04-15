@@ -252,7 +252,11 @@ pub fn create_standalone_window(
 #[cfg(target_os = "macos")]
 pub fn safari_user_agent() -> Option<String> {
     let version = std::process::Command::new("defaults")
-        .args(["read", "/Applications/Safari.app/Contents/Info", "CFBundleShortVersionString"])
+        .args([
+            "read",
+            "/Applications/Safari.app/Contents/Info",
+            "CFBundleShortVersionString",
+        ])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
