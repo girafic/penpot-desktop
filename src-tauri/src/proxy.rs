@@ -10,9 +10,11 @@ use tokio::sync::Mutex;
 use warp::Filter;
 
 use crate::config::{
-    desktop_to_apple_locale, desktop_to_penpot_locale, save_config, SharedConfig,
+    desktop_to_penpot_locale, save_config, SharedConfig,
     DESKTOP_CONFIG_JS, IFRAME_SHIM_JS,
 };
+#[cfg(target_os = "macos")]
+use crate::config::desktop_to_apple_locale;
 use crate::i18n;
 use crate::menu::{build_menu, register_help_menu, register_window_menu, update_selection_items};
 use crate::state::{

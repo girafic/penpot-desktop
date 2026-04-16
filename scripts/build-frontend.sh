@@ -40,7 +40,9 @@ check_prereqs() {
     if [ "$JAVA_VERSION" -lt 21 ] 2>/dev/null; then
         err "JDK ≥21 required, found: Java $JAVA_VERSION. Install e.g. with: brew install openjdk@21"
     fi
-    command -v clojure >/dev/null 2>&1 || err "clojure CLI not found. https://clojure.org/guides/install_clojure"
+    if ! command -v clojure >/dev/null 2>&1 && ! command -v clj >/dev/null 2>&1 && ! command -v clojure.cmd >/dev/null 2>&1; then
+        err "clojure CLI not found. https://clojure.org/guides/install_clojure"
+    fi
 
     NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
     if [ "$NODE_VERSION" -lt 18 ]; then
@@ -77,7 +79,16 @@ build_frontend() {
 
     # Resolve Clojure dependencies
     info "Resolving Clojure dependencies..."
-    clojure -P || true
+    if command -v clojure >/dev/null 2>&1; then
+        CLOJURE_CMD="clojure"
+    elif command -v clj >/dev/null 2>&1; then
+        CLOJURE_CMD="clj"
+    elif command -v clojure.cmd >/dev/null 2>&1; then
+        CLOJURE_CMD="clojure.cmd"
+    else
+        CLOJURE_CMD="clojure"
+    fi
+    $CLOJURE_CMD -P || true
 
     export NODE_ENV=production
     export VERSION="${PENPOT_BRANCH}"

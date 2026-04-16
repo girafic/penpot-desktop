@@ -591,8 +591,10 @@ pub fn run() {
                 .maximized(true)
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
-                .tabbing_identifier("penpot")
-                .disable_drag_drop_handler()
+                .disable_drag_drop_handler();
+            #[cfg(target_os = "macos")]
+            { main_builder = main_builder.tabbing_identifier("penpot"); }
+            let mut main_builder = main_builder
                 .on_navigation(|url| {
                     url.scheme() == "blob" || url.host_str() == Some("127.0.0.1")
                 })

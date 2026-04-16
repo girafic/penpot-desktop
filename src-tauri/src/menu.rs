@@ -100,6 +100,12 @@ pub fn register_window_menu() {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn register_help_menu() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn register_window_menu() {}
+
 // ── Selection-dependent menu items ─────────────────────────
 
 /// IDs of menu items that require a selection in the workspace.
