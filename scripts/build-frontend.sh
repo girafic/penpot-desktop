@@ -188,25 +188,6 @@ build_frontend() {
         info "store.cljs already patched, skipping."
     fi
 
-    # Patch main_menu.cljs: add a stable id to the workspace burger button so
-    # the desktop file-menu helper can find and click it from JS.
-    MAIN_MENU_CLJS="$FRONTEND_DIR/src/app/main/ui/workspace/main_menu.cljs"
-    if ! grep -q "workspace-main-menu-button" "$MAIN_MENU_CLJS" 2>/dev/null; then
-        info "Patching main_menu.cljs with stable burger button id..."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' 's|:aria-label (tr "shortcut-subsection.main-menu")|:id "workspace-main-menu-button" :aria-label (tr "shortcut-subsection.main-menu")|' "$MAIN_MENU_CLJS"
-        else
-            sed -i 's|:aria-label (tr "shortcut-subsection.main-menu")|:id "workspace-main-menu-button" :aria-label (tr "shortcut-subsection.main-menu")|' "$MAIN_MENU_CLJS"
-        fi
-        if grep -q "workspace-main-menu-button" "$MAIN_MENU_CLJS"; then
-            ok "main_menu.cljs patched."
-        else
-            warn "main_menu.cljs patch failed — burger-button anchor not found."
-        fi
-    else
-        info "main_menu.cljs already patched, skipping."
-    fi
-
     # Step 1: Compile ClojureScript → JavaScript (main + worker)
     info "Compiling ClojureScript → JavaScript (production)..."
     pnpm run clear:shadow-cache || true

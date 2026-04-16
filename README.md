@@ -39,19 +39,32 @@ Native desktop app that runs the **real Penpot frontend locally**. The backend i
 ### Native Desktop Experience
 
 - **macOS native tabs** (Cmd+T) and separate windows (Cmd+N) — links targeting `_blank` automatically open as new tabs
-- **Tab session restore** — open tabs are saved on exit (in visual tab order) and restored on next launch
+- **Multi-window tab group restore** — tab groups are saved per-window on exit (in visual tab order) and restored on next launch, including standalone windows
+- **Reopen closed tabs** — Cmd+Shift+T reopens the last closed tab; the Window menu shows up to 10 recently closed tabs by title
 - **Dynamic window titles** — each tab syncs its document title to the native tab/window title
 - **Full clipboard support** — Cmd+C/X/V/A work everywhere (input fields + canvas) via a native clipboard bridge
+- **Open URL from clipboard** — paste a Penpot project/file URL from your clipboard to open it in a new tab
+- **Copy file URL** — copy the current file's shareable backend URL to clipboard
 - **Native file export** — Save dialog for asset downloads with proper filename handling (extracted from query params, URL fragments, or path segments)
+
+### Plugins
+
+- **Plugin discovery** — installed plugins are automatically detected from your Penpot profile and listed in the Plugins menu
+- **One-click launch** — launch any installed plugin directly from the menu bar
+- **Plugin Manager** — open Penpot's built-in plugin manager from the Plugins menu
+- **CORS proxy** — plugin UIs that make cross-origin requests are automatically proxied through the embedded server, so plugins work without browser CORS restrictions
+- **Sandboxed iframes** — plugin iframe sources are rewritten to route through the local proxy
 
 ### Menus & Shortcuts
 
 - **Context-aware menus** that switch automatically between dashboard and workspace mode:
-  - _Dashboard:_ File (New Project), Edit, View, Go (Drafts, Libraries, Search)
-  - _Workspace:_ File (Export), Edit (Duplicate, Group, Components), View (Zoom, Rulers, Panels), Shape (Tools, Boolean ops, Alignment, Ordering), Go (Viewer, Inspect, Dashboard)
-- **Selection-dependent menu items** — items like Duplicate, Delete, Group, Boolean operations, and Alignment auto-enable/disable based on current selection
+  - _Dashboard:_ File (New Project, Open URL from Clipboard), Edit, View, Go (Drafts, Libraries, Search)
+  - _Workspace:_ File (Export, Pin Version, Toggle Shared Library, Download .penpot, Export Frames as PDF), Edit (Duplicate, Group, Components), View (Zoom, Rulers, Panels), Shape (Tools, Boolean ops, Alignment, Ordering), Plugins, Go (Viewer, Inspect, Dashboard)
+- **Selection-dependent menu items** — 39 items auto-enable/disable based on current selection count, shape types, and component state (e.g., Boolean operations require 2+ eligible shapes)
+- **Dynamic menu labels** — labels adapt to context: "Create Component" ↔ "Create Variant", "Detach Component" ↔ "Detach Instance", "Focus On" ↔ "Focus Off"
 - **Native accelerator forwarding** — modifier-based menu accelerators (Cmd/Ctrl/Alt/Shift combos) are handled natively and forwarded to Penpot's internal shortcut handler
 - **Keyboard shortcut bridge** — menu actions are translated to synthetic keyboard events for Penpot/Mousetrap, including platform-aware Cmd→Ctrl normalization on Windows/Linux
+- **Window menu** (macOS) — lists open tabs/windows, recently closed tabs, Minimize, and macOS Sequoia tiling options (Fill, Center, Move & Resize)
 - **Help menu** — links to User Guide, Tutorials, Courses, Plugins, Libraries, Community, GitHub, Feedback, Website, and Release Notes (open in default browser)
 
 ### Internationalization
@@ -61,8 +74,8 @@ Native desktop app that runs the **real Penpot frontend locally**. The backend i
 
 ### Rendering
 
-- **Classic (SVG)** — broader compatibility
-- **WASM (GPU)** — Skia-based renderer, faster, requires WebGL2
+- **Classic (SVG)** — broader compatibility (default)
+- **WASM (GPU)** — Skia-based renderer, faster, requires WebGL2 (experimental)
 - Configurable in settings (Cmd+,)
 
 ### Reverse Proxy
@@ -73,6 +86,7 @@ Native desktop app that runs the **real Penpot frontend locally**. The backend i
 - **Backend URL rewriting** — text responses (JSON/transit) are rewritten so the SPA uses the proxy origin
 - **Share link rewriting** — share/view links are automatically rewritten from proxy URL to real backend URL (in UI inputs and clipboard)
 - **Referer/Origin header rewriting** — avoids CORS and hotlink protection issues
+- **CORS proxy for plugins** — relays cross-origin requests from plugin iframes through `/__penpot_desktop/cors-proxy`
 - **Error deduplication** — repeated proxy errors are suppressed (5s cooldown) to keep logs clean
 - **Safari user-agent** (macOS) — spoofs Safari UA for maximum WebKit compatibility
 
@@ -117,9 +131,9 @@ The frontend build must match the backend version. Use the right branch/tag:
 
 | Backend                        | Branch/Tag         | Command                                        |
 | ------------------------------ | ------------------ | ---------------------------------------------- |
-| `design.penpot.app`            | Latest release tag | `PENPOT_BRANCH=2.14.1 bun run build-frontend`  |
+| `design.penpot.app`            | Latest release tag | `PENPOT_BRANCH=2.14.2 bun run build-frontend`  |
 | Local devenv (`:3449`/`:3450`) | `develop`          | `PENPOT_BRANCH=develop bun run build-frontend` |
-| Docker self-hosted (`:9001`)   | Latest release tag | `PENPOT_BRANCH=2.14.0 bun run build-frontend`  |
+| Docker self-hosted (`:9001`)   | Latest release tag | `PENPOT_BRANCH=2.14.2 bun run build-frontend`  |
 
 Check the latest release tag at [github.com/penpot/penpot/releases](https://github.com/penpot/penpot/releases).
 
@@ -146,29 +160,48 @@ The URL is saved. On the next launch, the app connects automatically.
 
 **App-wide:**
 
-| Shortcut   | Action           |
-| ---------- | ---------------- |
-| Cmd+,      | Open Settings    |
-| Cmd+T      | New Tab          |
-| Cmd+N      | New Window       |
-| Cmd+W      | Close Tab/Window |
-| Cmd+R      | Reload Tab       |
-| Ctrl+Cmd+F | Fullscreen       |
-| Cmd+Alt+I  | DevTools         |
-| Alt+M      | Toggle Theme     |
+| Shortcut     | Action              |
+| ------------ | ------------------- |
+| Cmd+,        | Open Settings       |
+| Cmd+T        | New Tab             |
+| Cmd+N        | New Window          |
+| Cmd+W        | Close Tab/Window    |
+| Cmd+Shift+T  | Reopen Closed Tab   |
+| Cmd+R        | Reload Tab          |
+| Ctrl+Cmd+F   | Fullscreen          |
+| Cmd+Alt+I    | DevTools            |
+| Alt+M        | Toggle Theme        |
+
+**Workspace — File:**
+
+| Shortcut     | Action                |
+| ------------ | --------------------- |
+| Cmd+Shift+E  | Export                |
+| Cmd+Alt+H    | Show Version History  |
+| —            | Pin Version           |
+| —            | Toggle Shared Library |
+| —            | Download .penpot      |
+| —            | Export Frames as PDF  |
+| —            | Copy File URL         |
 
 **Workspace — Edit:**
 
-| Shortcut    | Action           |
-| ----------- | ---------------- |
-| Cmd+Z       | Undo             |
-| Cmd+Shift+Z | Redo             |
-| Cmd+D       | Duplicate        |
-| Backspace   | Delete           |
-| Cmd+G       | Group            |
-| Shift+G     | Ungroup          |
-| Cmd+K       | Create Component |
-| Cmd+Shift+K | Detach Component |
+| Shortcut     | Action             |
+| ------------ | ------------------ |
+| Cmd+Z        | Undo               |
+| Cmd+Shift+Z  | Redo               |
+| Cmd+D        | Duplicate          |
+| Backspace    | Delete             |
+| Cmd+G        | Group              |
+| Shift+G      | Ungroup            |
+| Cmd+K        | Create Component   |
+| Cmd+Shift+K  | Detach Component   |
+| Alt+N        | Rename             |
+| Cmd+Alt+G    | Selection to Board |
+| F            | Focus On           |
+| Cmd+Shift+H  | Toggle Visibility  |
+| Cmd+Shift+L  | Toggle Lock        |
+| Shift+T      | Set as Thumbnail   |
 
 **Workspace — View:**
 
@@ -199,21 +232,37 @@ The URL is saved. On the next launch, the app connects automatically.
 
 **Workspace — Shape operations:**
 
-| Shortcut          | Action                                              |
-| ----------------- | --------------------------------------------------- |
-| Shift+H / Shift+V | Flip Horizontal / Vertical                          |
-| Shift+A           | Add Flex Layout                                     |
-| Cmd+Shift+A       | Add Grid Layout                                     |
-| Cmd+Alt+U/D/I/E   | Boolean Union / Difference / Intersection / Exclude |
+| Shortcut                         | Action                                              |
+| -------------------------------- | --------------------------------------------------- |
+| Shift+H / Shift+V               | Flip Horizontal / Vertical                          |
+| Shift+A                          | Add Flex Layout                                     |
+| Cmd+Shift+A                      | Add Grid Layout                                     |
+| Cmd+Alt+U/D/I/E                  | Boolean Union / Difference / Intersection / Exclude |
+| Cmd+Up / Cmd+Down                | Bring Forward / Send Backward                       |
+| Cmd+Shift+Up / Cmd+Shift+Down   | Bring to Front / Send to Back                       |
+
+**Workspace — Alignment:**
+
+| Shortcut         | Action                  |
+| ---------------- | ----------------------- |
+| Alt+A            | Align Left              |
+| Alt+H            | Align Horizontal Center |
+| Alt+D            | Align Right             |
+| Alt+W            | Align Top               |
+| Alt+V            | Align Vertical Center   |
+| Alt+S            | Align Bottom            |
+| Cmd+Shift+Alt+H  | Distribute Horizontally |
+| Cmd+Shift+Alt+V  | Distribute Vertically   |
 
 **Workspace — Navigation:**
 
-| Shortcut    | Action            |
-| ----------- | ----------------- |
-| G then V    | Open Viewer       |
-| G then I    | Open Inspect      |
-| G then D    | Back to Dashboard |
-| Cmd+Shift+E | Export            |
+| Shortcut     | Action            |
+| ------------ | ----------------- |
+| G then V     | Open Viewer       |
+| G then I     | Open Inspect      |
+| G then D     | Back to Dashboard |
+| Cmd+Shift+E  | Export            |
+| ?            | Show Shortcuts    |
 
 **Dashboard:**
 
@@ -266,7 +315,13 @@ penpot-desktop/
     │   └── default.json
     ├── locales/                # i18n translations (JSON)
     └── src/
-        ├── main.rs             # Reverse proxy + Tauri app
+        ├── main.rs             # App setup, menu event handling, session restore
+        ├── proxy.rs            # Reverse proxy (Warp) + internal desktop API
+        ├── config.rs           # Config load/save, JS injection, frontend patches
+        ├── state.rs            # Global state (tabs, plugins, modes, closed tabs)
+        ├── windows.rs          # Window/tab creation, plugin JS helpers
+        ├── menu.rs             # Menu builder, selection-dependent items, i18n
+        ├── commands.rs         # Tauri commands (save_download, get_proxy_url)
         └── i18n.rs             # Internationalization module
 ```
 
@@ -283,20 +338,20 @@ The app stores its config at:
   "backend_url": "https://design.penpot.app",
   "recent_urls": ["https://design.penpot.app", "http://localhost:9001"],
   "proxy_port": 7080,
-  "renderer": "wasm",
+  "renderer": "classic",
   "language": "en",
-  "open_tabs": ["/#/workspace/...", "/#/view/..."]
+  "open_groups": [["/#/workspace/...", "/#/view/..."], ["/#/workspace/..."]]
 }
 ```
 
-| Key           | Default  | Description                                       |
-| ------------- | -------- | ------------------------------------------------- |
-| `backend_url` | `""`     | Penpot backend URL                                |
-| `recent_urls` | `[]`     | Previously used backend URLs                      |
-| `proxy_port`  | `7080`   | Local reverse proxy port                          |
-| `renderer`    | `"wasm"` | Renderer engine (`wasm` or `classic`)             |
-| `language`    | `"en"`   | UI language (e.g. `de`, `es`, `fr`, `ru`)         |
-| `open_tabs`   | `[]`     | Saved tab URLs for session restore (auto-managed) |
+| Key           | Default     | Description                                              |
+| ------------- | ----------- | -------------------------------------------------------- |
+| `backend_url` | `""`        | Penpot backend URL                                       |
+| `recent_urls` | `[]`        | Previously used backend URLs                             |
+| `proxy_port`  | `7080`      | Local reverse proxy port                                 |
+| `renderer`    | `"classic"` | Renderer engine (`classic` or `wasm`)                    |
+| `language`    | `"en"`      | UI language (e.g. `de`, `es`, `fr`, `ru`)                |
+| `open_groups` | `[]`        | Tab groups per window for session restore (auto-managed) |
 
 Changes to `proxy_port`, `renderer`, and `language` require a restart.
 
@@ -318,6 +373,11 @@ Changes to `proxy_port`, `renderer`, and `language` require a restart.
 
 - Backend must support WebSocket
 - The proxy forwards cookies and Origin headers for authentication
+
+**Plugins not loading:**
+
+- Plugin UIs are proxied through the embedded CORS proxy — check the terminal for proxy errors
+- Make sure the backend has plugins enabled and the plugin is installed in your Penpot profile
 
 **Port already in use:**
 
