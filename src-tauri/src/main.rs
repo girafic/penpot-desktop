@@ -59,21 +59,36 @@ pub fn run() {
     let port = config.proxy_port;
 
     // Determine Penpot frontend dir
-    let penpot_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|pp| pp.join("penpot-frontend")))
-        .unwrap_or_else(|| PathBuf::from("src/penpot"));
+    // Priority: bundled resources (release) → dev mode fallback
+    let penpot_dir = {
+        let exe = std::env::current_exe().ok();
 
-    // Fallback: check relative to project root (dev mode)
-    let penpot_dir = if penpot_dir.is_dir() {
-        penpot_dir
-    } else {
-        // Dev mode: look relative to Cargo.toml
-        let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(|p| p.join("src/penpot"))
-            .unwrap_or_else(|| PathBuf::from("src/penpot"));
-        dev_dir
+        // Tauri bundles `"resources": ["../src/penpot/**/*"]` preserving the
+        // relative path structure. `../` becomes `_up_/` in the bundle:
+        //   macOS:   .app/Contents/Resources/_up_/src/penpot/
+        //   Linux:   usr/lib/<name>/_up_/src/penpot/ (deb) or alongside exe (AppImage)
+        //   Windows: exe-dir/_up_/src/penpot/
+        let candidates: Vec<PathBuf> = exe.iter().flat_map(|e| {
+            let parent = e.parent().unwrap();
+            vec![
+                // macOS .app bundle
+                parent.join("../Resources/_up_/src/penpot"),
+                // Linux deb
+                parent.join("../lib/penpot-desktop/_up_/src/penpot"),
+                // Linux AppImage / Windows
+                parent.join("_up_/src/penpot"),
+            ]
+        }).collect();
+
+        candidates.into_iter()
+            .find(|p| p.is_dir())
+            .unwrap_or_else(|| {
+                // Dev mode: relative to Cargo.toml
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .map(|p| p.join("src/penpot"))
+                    .unwrap_or_else(|| PathBuf::from("src/penpot"))
+            })
     };
 
     println!("📁 Penpot frontend directory: {}", penpot_dir.display());
