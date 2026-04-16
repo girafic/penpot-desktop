@@ -75,6 +75,13 @@ build_frontend() {
     # Install Node dependencies (frontend has its own pnpm-workspace.yaml)
     info "Installing Node dependencies..."
     cd "$FRONTEND_DIR"
+
+    # On Windows, pnpm runs lifecycle scripts via cmd.exe which can't handle
+    # Unix subshell syntax in postinstall scripts. Force bash as the script shell.
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) pnpm config set script-shell "$(which bash)" ;;
+    esac
+
     pnpm install
 
     # Resolve Clojure dependencies

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(target_os = "macos")]
 use tauri::Manager;
 
 static TAB_COUNTER: AtomicU32 = AtomicU32::new(1);
@@ -120,6 +121,7 @@ pub fn create_tab_window(
     app: &tauri::AppHandle,
     port: u16,
     url: Option<&str>,
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     anchor_label: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
@@ -154,6 +156,7 @@ pub fn create_tab_window(
 
     let label_clone = label.clone();
     let restore_url_clone = restore_url.clone();
+    #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(
         app,
         &label,
@@ -165,6 +168,7 @@ pub fn create_tab_window(
     .disable_drag_drop_handler();
     #[cfg(target_os = "macos")]
     { builder = builder.tabbing_identifier("penpot"); }
+    #[allow(unused_mut)]
     let mut builder = builder
     .on_navigation(|url| {
         url.scheme() == "blob" || url.host_str() == Some("127.0.0.1")

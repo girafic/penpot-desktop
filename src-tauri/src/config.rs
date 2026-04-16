@@ -36,6 +36,7 @@ fn default_language() -> String {
 }
 
 /// Map desktop locale codes to Apple locale codes for `AppleLanguages`.
+#[cfg(target_os = "macos")]
 pub fn desktop_to_apple_locale(desktop: &str) -> &'static str {
     match desktop {
         "en" => "en",

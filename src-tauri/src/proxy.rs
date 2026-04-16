@@ -16,7 +16,9 @@ use crate::config::{
 #[cfg(target_os = "macos")]
 use crate::config::desktop_to_apple_locale;
 use crate::i18n;
-use crate::menu::{build_menu, register_help_menu, register_window_menu, update_selection_items};
+use crate::menu::{build_menu, update_selection_items};
+#[cfg(target_os = "macos")]
+use crate::menu::{register_help_menu, register_window_menu};
 use crate::state::{
     focused_window_mode, get_window_mode, set_window_mode, track_tab_title, track_tab_url,
     update_plugins, PluginInfo, APP_HANDLE, CURRENT_LANG,

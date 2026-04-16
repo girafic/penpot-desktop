@@ -28,7 +28,9 @@ use windows::{
 };
 
 mod menu;
-use menu::{build_menu, register_help_menu, register_window_menu, update_selection_items};
+use menu::{build_menu, update_selection_items};
+#[cfg(target_os = "macos")]
+use menu::{register_help_menu, register_window_menu};
 
 mod commands;
 use commands::{get_proxy_url, save_download};
@@ -601,6 +603,7 @@ pub fn run() {
                 vec![]
             };
 
+            #[allow(unused_mut)]
             let mut main_builder = WebviewWindowBuilder::new(app, "main", Default::default())
                 .title("Penpot Desktop")
                 .maximized(true)
@@ -609,6 +612,7 @@ pub fn run() {
                 .disable_drag_drop_handler();
             #[cfg(target_os = "macos")]
             { main_builder = main_builder.tabbing_identifier("penpot"); }
+            #[allow(unused_mut)]
             let mut main_builder = main_builder
                 .on_navigation(|url| {
                     url.scheme() == "blob" || url.host_str() == Some("127.0.0.1")
@@ -783,7 +787,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_proxy_url, save_download])
         .build(tauri::generate_context!())
         .expect("Failed to build Penpot Desktop")
-        .run(move |app, event| {
+        .run(move |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(list) = TAB_URLS.get() {
                     if let Ok(tab_map) = list.read() {

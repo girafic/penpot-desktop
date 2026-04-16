@@ -30,7 +30,7 @@ jobs:
 
     name: Build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
