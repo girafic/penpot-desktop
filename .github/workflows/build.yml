@@ -76,11 +76,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          # DeLaGuardo/setup-clojure installs a PowerShell *module* (ClojureTools)
+          # that exports clojure/clj as functions — not standalone scripts.
+          # Create a bash wrapper that loads the module and calls the function.
           BIN_DIR="$HOME/bin"
           mkdir -p "$BIN_DIR"
-          PS1_PATH='C:\Program Files\WindowsPowerShell\Modules\ClojureTools\clojure.ps1'
           echo '#!/bin/bash' > "$BIN_DIR/clojure"
-          echo "exec powershell.exe -ExecutionPolicy Bypass -Command \"& '${PS1_PATH}' \$*\"" >> "$BIN_DIR/clojure"
+          echo 'exec powershell.exe -ExecutionPolicy Bypass -Command "clojure $*"' >> "$BIN_DIR/clojure"
           chmod +x "$BIN_DIR/clojure"
           cat "$BIN_DIR/clojure"
           echo "$BIN_DIR" >> "$GITHUB_PATH"
