@@ -355,6 +355,20 @@ The app stores its config at:
 
 Changes to `proxy_port`, `renderer`, and `language` require a restart.
 
+## Installation
+
+Download the latest release from the [Releases](../../releases) page.
+
+**macOS:** After opening the `.dmg` and dragging the app to Applications, macOS may block it because it's unsigned. Run:
+
+```bash
+xattr -cr "/Applications/Penpot Desktop.app"
+```
+
+**Linux:** `.AppImage` — make executable and run. `.deb` — install with `sudo dpkg -i`.
+
+**Windows:** Run the `.msi` or `.exe` installer.
+
 ## Troubleshooting
 
 **Frontend build fails:**

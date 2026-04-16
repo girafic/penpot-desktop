@@ -72,6 +72,20 @@ jobs:
         with:
           cli: latest
 
+      - name: Create Clojure bash wrapper (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # DeLaGuardo/setup-clojure installs PowerShell scripts (.ps1)
+          # that Git Bash can't execute. Create bash wrappers in a PATH dir.
+          BIN_DIR="$HOME/bin"
+          mkdir -p "$BIN_DIR"
+          CLJ_DIR="/c/Program Files/WindowsPowerShell/Modules/ClojureTools"
+          echo "#!/bin/bash" > "$BIN_DIR/clojure"
+          echo "exec pwsh -File \"$CLJ_DIR/clojure.ps1\" \"\$@\"" >> "$BIN_DIR/clojure"
+          chmod +x "$BIN_DIR/clojure"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
