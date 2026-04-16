@@ -12,7 +12,20 @@
   "file": {
     "file": "Fişier",
     "new-project": "Proiect nou",
-    "export": "Exportă forme…"
+    "export": "Exportă forme…",
+    "add-shared": "Adăugare ca bibliotecă partajată",
+    "remove-shared": "Eliminare ca bibliotecă partajată",
+    "pin-version": "Fixează această versiune",
+    "version-history": "Istoricul versiunilor",
+    "download-binary": "Descarcă fișier Penpot (.penpot)",
+    "export-frames-pdf": "Exportă cadre ca PDF…",
+    "reopen-tab": "Redeschide fila închisă",
+    "recently-closed": "File închise recent",
+    "recently-closed-empty": "Nicio filă închisă recent",
+    "copy-url": "Copiază URL-ul fișierului",
+    "open-url": "Deschide URL din clipboard",
+    "invalid-url-title": "URL Penpot invalid",
+    "invalid-url-body": "Clipboard-ul nu conține un URL Penpot valid."
   },
   "edit": {
     "edit": "Editare",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Formă",
     "tools": "Instrumente",
-    "frame": "Cadru",
+    "board": "Cadru",
     "rectangle": "Dreptunghi",
     "ellipse": "Elipsă",
     "text": "Text",
@@ -122,6 +135,11 @@
     "website": "Site-ul Penpot",
     "release-notes": "Note de lansare"
   },
+  "plugins": {
+    "plugins": "Pluginuri",
+    "manager": "Manager pluginuri",
+    "no-plugins": "Niciun plugin instalat"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Frontend local · Backend configurabil",
@@ -143,6 +161,8 @@
     "conn-failed": "Conexiune eşuată",
     "cloud": "Penpot Cloud",
     "local": "Local",
-    "dev": "Dezvoltare"
+    "dev": "Dezvoltare",
+    "restart-prompt": "Reporniți aplicația pentru a aplica complet noua limbă?",
+    "restart-later": "Mai târziu"
   }
 }

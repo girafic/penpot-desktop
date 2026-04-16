@@ -1,7 +1,35 @@
 use crate::i18n;
-use crate::state::{APP_HANDLE, CURRENT_LANG};
+use crate::state::{get_closed_tabs, get_plugins, APP_HANDLE, CURRENT_LANG};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Manager;
+
+/// Human-readable label for a closed tab entry. Prefers the stored
+/// document title (e.g. "My Design — Penpot"); falls back to truncated URL.
+fn closed_tab_label(tab: &crate::state::ClosedTab) -> String {
+    if !tab.title.is_empty() {
+        const MAX: usize = 55;
+        if tab.title.chars().count() <= MAX {
+            return tab.title.clone();
+        }
+        let truncated: String = tab.title.chars().take(MAX - 1).collect();
+        return format!("{truncated}…");
+    }
+    const MAX: usize = 55;
+    let url = &tab.url;
+    if url.chars().count() <= MAX {
+        return url.to_string();
+    }
+    let head: String = url.chars().take(30).collect();
+    let tail: String = url
+        .chars()
+        .rev()
+        .take(20)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
+}
 
 // ── macOS Help-menu registration ─────────────────────────
 
@@ -17,6 +45,57 @@ pub fn register_help_menu() {
             let last_item: *mut AnyObject = objc2::msg_send![main_menu, itemAtIndex: count - 1];
             let help_ns: *mut AnyObject = objc2::msg_send![last_item, submenu];
             let _: () = objc2::msg_send![ns_app, setHelpMenu: help_ns];
+        }
+    }
+}
+
+// ── macOS Window-menu registration ───────────────────────
+//
+// Marks the Window submenu as NSApp's `windowsMenu`. Once registered, AppKit
+// automatically appends localized standard items (Minimize, Zoom, Move & Resize,
+// Tile / Fill / Center, Bring All to Front, Select Previous/Next Tab, the open
+// window list, etc.) and keeps them in sync with the user's system language.
+//
+// Layout of the main menu (workspace/dashboard): App, File, Edit, View, [Shape],
+// Go, Window, Help — so the Window submenu is always at index `count - 2`.
+
+#[cfg(target_os = "macos")]
+pub fn register_window_menu() {
+    unsafe {
+        use objc2::runtime::{AnyClass, AnyObject, Sel};
+        use objc2::sel;
+        let ns_app: *mut AnyObject =
+            objc2::msg_send![AnyClass::get(c"NSApplication").unwrap(), sharedApplication];
+        let main_menu: *mut AnyObject = objc2::msg_send![ns_app, mainMenu];
+        let count: isize = objc2::msg_send![main_menu, numberOfItems];
+        if count < 2 {
+            return;
+        }
+        let win_item: *mut AnyObject = objc2::msg_send![main_menu, itemAtIndex: count - 2];
+        let win_ns: *mut AnyObject = objc2::msg_send![win_item, submenu];
+        let _: () = objc2::msg_send![ns_app, setWindowsMenu: win_ns];
+
+        // macOS Sequoia injects window-tile items (Fill, Center, Move & Resize,
+        // …) at the top of the windowsMenu, which pushes our Minimize item down.
+        // Walk the items, find the one that fires `performMiniaturize:`, and move
+        // it to index 0 so it appears first — matching Safari/Finder layout.
+        let target_sel: Sel = sel!(performMiniaturize:);
+        let n: isize = objc2::msg_send![win_ns, numberOfItems];
+        let mut minimize_idx: isize = -1;
+        for i in 0..n {
+            let item: *mut AnyObject = objc2::msg_send![win_ns, itemAtIndex: i];
+            let action: Sel = objc2::msg_send![item, action];
+            if action == target_sel {
+                minimize_idx = i;
+                break;
+            }
+        }
+        if minimize_idx > 0 {
+            let item: *mut AnyObject = objc2::msg_send![win_ns, itemAtIndex: minimize_idx];
+            let _: *mut AnyObject = objc2::msg_send![item, retain];
+            let _: () = objc2::msg_send![win_ns, removeItemAtIndex: minimize_idx];
+            let _: () = objc2::msg_send![win_ns, insertItem: item, atIndex: 0_isize];
+            let _: () = objc2::msg_send![item, release];
         }
     }
 }
@@ -64,7 +143,7 @@ pub(crate) const BOOL_ELIGIBLE_TYPES: &[&str] =
     &["rect", "circle", "path", "bool", "image", "svg-raw"];
 
 /// Shape types that can be ungrouped.
-pub(crate) const UNGROUP_ELIGIBLE_TYPES: &[&str] = &["group", "bool", "frame"];
+pub(crate) const UNGROUP_ELIGIBLE_TYPES: &[&str] = &["group", "bool", "board"];
 
 /// Determine whether a specific menu item should be enabled based on
 /// the selection count, types of selected shapes, and component/instance flags.
@@ -477,36 +556,77 @@ pub fn build_menu(
     let view_submenu = view.build()?;
 
     // ── Window (always) ──
+    // Tab/window creation lives in the File menu. AppKit automatically appends
+    // the localized standard items (Zoom, Move & Resize, Tile, tab navigation,
+    // open window list, etc.) once `register_window_menu()` runs.
     let window_submenu = SubmenuBuilder::new(app, &t("window.window"))
         .item(&PredefinedMenuItem::minimize(
             app,
             Some(&t("app.minimize")),
         )?)
-        .item(&mi!(app, "new-tab", t("window.new-tab"), "CmdOrCtrl+T"))
-        .item(&mi!(
-            app,
-            "new-window",
-            t("window.new-window"),
-            "CmdOrCtrl+N"
-        ))
-        .item(&mi!(
-            app,
-            "reload-tab",
-            t("window.reload-tab"),
-            "CmdOrCtrl+R"
-        ))
-        .separator()
-        .item(&mi!(app, "close-tab", t("app.close-window"), "CmdOrCtrl+W"))
         .build()?;
 
     let mut menu_builder = MenuBuilder::new(app).item(&app_submenu);
 
     if mode == "dashboard" {
         // ── File (dashboard) ──
+        // Recently closed tabs submenu — same shape as the workspace version.
+        let closed_tabs = get_closed_tabs();
+        let has_closed = !closed_tabs.is_empty();
+        let recently_closed_title = if has_closed {
+            format!("{} ({})", t("file.recently-closed"), closed_tabs.len())
+        } else {
+            t("file.recently-closed")
+        };
+        let mut recently_closed_builder =
+            SubmenuBuilder::new(app, &recently_closed_title);
+        if has_closed {
+            for (i, tab) in closed_tabs.iter().enumerate().take(10) {
+                let label = closed_tab_label(tab);
+                let id = format!("reopen-closed-{i}");
+                recently_closed_builder = recently_closed_builder.item(&mi!(app, id, label));
+            }
+        } else {
+            let placeholder = MenuItemBuilder::with_id(
+                "recently-closed-empty",
+                &t("file.recently-closed-empty").replace('&', "&&"),
+            )
+            .enabled(false)
+            .build(app)?;
+            recently_closed_builder = recently_closed_builder.item(&placeholder);
+        }
+        let recently_closed_submenu = recently_closed_builder.build()?;
+
+        let reopen_item = MenuItemBuilder::with_id(
+            "reopen-closed-tab",
+            &t("file.reopen-tab").replace('&', "&&"),
+        )
+        .accelerator("CmdOrCtrl+Shift+T")
+        .enabled(has_closed)
+        .build(app)?;
+
         let file_submenu = SubmenuBuilder::new(app, &t("file.file"))
+            .item(&mi!(app, "new-tab", t("window.new-tab"), "CmdOrCtrl+T"))
+            .item(&mi!(
+                app,
+                "new-window",
+                t("window.new-window"),
+                "CmdOrCtrl+N"
+            ))
+            .item(&mi!(app, "open-url-from-clipboard", t("file.open-url")))
+            .separator()
             .item(&mi!(app, "new-project", d("file.new-project", "+")))
             .separator()
+            .item(&mi!(
+                app,
+                "reload-tab",
+                t("window.reload-tab"),
+                "CmdOrCtrl+R"
+            ))
+            .separator()
             .item(&mi!(app, "close-tab", t("app.close-window"), "CmdOrCtrl+W"))
+            .item(&reopen_item)
+            .item(&recently_closed_submenu)
             .build()?;
 
         // ── Go (dashboard) ──
@@ -528,24 +648,91 @@ pub fn build_menu(
             .item(&go_submenu);
     } else {
         // ── File (workspace) ──
+        // Recently closed tabs submenu (dynamic). Built from CLOSED_TABS; each
+        // entry gets id `reopen-closed-<i>` where 0 = most recent.
+        let closed_tabs = get_closed_tabs();
+        let has_closed = !closed_tabs.is_empty();
+        let recently_closed_title = if has_closed {
+            format!("{} ({})", t("file.recently-closed"), closed_tabs.len())
+        } else {
+            t("file.recently-closed")
+        };
+        let mut recently_closed_builder =
+            SubmenuBuilder::new(app, &recently_closed_title);
+        if has_closed {
+            for (i, tab) in closed_tabs.iter().enumerate().take(10) {
+                let label = closed_tab_label(tab);
+                let id = format!("reopen-closed-{i}");
+                recently_closed_builder = recently_closed_builder.item(&mi!(app, id, label));
+            }
+        } else {
+            let placeholder = MenuItemBuilder::with_id(
+                "recently-closed-empty",
+                &t("file.recently-closed-empty").replace('&', "&&"),
+            )
+            .enabled(false)
+            .build(app)?;
+            recently_closed_builder = recently_closed_builder.item(&placeholder);
+        }
+        let recently_closed_submenu = recently_closed_builder.build()?;
+
+        let reopen_item = MenuItemBuilder::with_id(
+            "reopen-closed-tab",
+            &t("file.reopen-tab").replace('&', "&&"),
+        )
+        .accelerator("CmdOrCtrl+Shift+T")
+        .enabled(has_closed)
+        .build(app)?;
+
         let file_submenu = SubmenuBuilder::new(app, &t("file.file"))
-            .item(&mi!(app, "export", t("file.export"), "CmdOrCtrl+Shift+E"))
+            .item(&mi!(app, "new-tab", t("window.new-tab"), "CmdOrCtrl+T"))
+            .item(&mi!(
+                app,
+                "new-window",
+                t("window.new-window"),
+                "CmdOrCtrl+N"
+            ))
+            .item(&mi!(app, "copy-file-url", t("file.copy-url")))
+            .item(&mi!(app, "open-url-from-clipboard", t("file.open-url")))
             .separator()
+            .item(&mi!(
+                app,
+                "reload-tab",
+                t("window.reload-tab"),
+                "CmdOrCtrl+R"
+            ))
+            .separator()
+            .item(&mi!(app, "toggle-shared", t("file.add-shared")))
+            .separator()
+            .item(&mi!(app, "pin-version", t("file.pin-version")))
+            .item(&mi!(
+                app,
+                "show-version-history",
+                d("file.version-history", "Cmd+Alt+H")
+            ))
+            .separator()
+            .item(&mi!(app, "export", t("file.export"), "CmdOrCtrl+Shift+E"))
+            .item(&mi!(app, "download-binary", t("file.download-binary")))
+            .item(&mi!(app, "export-frames-pdf", t("file.export-frames-pdf")))
+            .separator()
+            .item(&reopen_item)
+            .item(&recently_closed_submenu)
             .item(&mi!(app, "close-tab", t("app.close-window"), "CmdOrCtrl+W"))
             .build()?;
 
         // ── Shape ──
         let tools_submenu = SubmenuBuilder::new(app, &t("shape.tools"))
-            .item(&mi!(app, "tool-frame", d("shape.frame", "B")))
-            .item(&mi!(app, "tool-rect", d("shape.rectangle", "R")))
-            .item(&mi!(app, "tool-ellipse", d("shape.ellipse", "E")))
-            .item(&mi!(app, "tool-text", d("shape.text", "T")))
-            .item(&mi!(app, "tool-path", d("shape.path", "P")))
-            .item(&mi!(app, "tool-curve", d("shape.curve", "Shift+C")))
+            .item(&mi!(app, "tool-board", d("shape.board", "B"), "B"))
+            .item(&mi!(app, "tool-rect", d("shape.rectangle", "R"), "R"))
+            .item(&mi!(app, "tool-ellipse", d("shape.ellipse", "E"), "E"))
+            .item(&mi!(app, "tool-text", d("shape.text", "T"), "T"))
+            .item(&mi!(app, "tool-path", d("shape.path", "P"), "P"))
+            .item(&mi!(app, "tool-curve", d("shape.curve", "Shift+C"), "Shift+C"))
             .item(&mi!(
                 app,
                 "insert-image",
-                d("shape.insert-image", "Shift+K")
+                d("shape.insert-image", "Shift+K"),
+                "Shift+K"
             ))
             .build()?;
 
@@ -606,8 +793,8 @@ pub fn build_menu(
         let shape_submenu = SubmenuBuilder::new(app, &t("shape.shape"))
             .item(&tools_submenu)
             .separator()
-            .item(&mi!(app, "flip-h", d("shape.flip-h", "Shift+H")))
-            .item(&mi!(app, "flip-v", d("shape.flip-v", "Shift+V")))
+            .item(&mi!(app, "flip-h", d("shape.flip-h", "Shift+H"), "Shift+H"))
+            .item(&mi!(app, "flip-v", d("shape.flip-v", "Shift+V"), "Shift+V"))
             .separator()
             .item(&order_submenu)
             .item(&bool_submenu)
@@ -615,7 +802,8 @@ pub fn build_menu(
             .item(&mi!(
                 app,
                 "toggle-layout-flex",
-                d("shape.flex-layout", "Shift+A")
+                d("shape.flex-layout", "Shift+A"),
+                "Shift+A"
             ))
             .item(&mi!(
                 app,
@@ -684,12 +872,41 @@ pub fn build_menu(
             .item(&mi!(app, "go-dashboard", d("go.back-dashboard", "G D")))
             .build()?;
 
+        // ── Plugins (workspace) — dynamic list from profile API ──
+        let plugins = get_plugins();
+        let mut plugins_builder =
+            SubmenuBuilder::new(app, &t("plugins.plugins"))
+                .item(&mi!(
+                    app,
+                    "plugins-manager",
+                    d("plugins.manager", "Cmd+Alt+P"),
+                    "CmdOrCtrl+Alt+P"
+                ))
+                .separator();
+        if plugins.is_empty() {
+            let placeholder = MenuItemBuilder::with_id(
+                "plugins-empty",
+                &t("plugins.no-plugins").replace('&', "&&"),
+            )
+            .enabled(false)
+            .build(app)?;
+            plugins_builder = plugins_builder.item(&placeholder);
+        } else {
+            for (i, plugin) in plugins.iter().enumerate() {
+                let id = format!("plugin-{i}");
+                plugins_builder =
+                    plugins_builder.item(&mi!(app, id, plugin.name.clone()));
+            }
+        }
+        let plugins_submenu = plugins_builder.build()?;
+
         menu_builder = menu_builder
             .item(&file_submenu)
             .item(&edit_submenu)
             .item(&view_submenu)
             .item(&shape_submenu)
-            .item(&go_submenu);
+            .item(&go_submenu)
+            .item(&plugins_submenu);
     }
 
     // ── Help (always) ──

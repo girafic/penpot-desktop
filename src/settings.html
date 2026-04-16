@@ -565,6 +565,7 @@
         })
           .then(function () {
             applyTranslations();
+            fetch("/__penpot_desktop/restart-app", { method: "POST" });
           })
           .catch(function () {});
       }

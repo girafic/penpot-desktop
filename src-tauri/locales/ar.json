@@ -12,7 +12,20 @@
   "file": {
     "file": "ملف",
     "new-project": "مشروع جديد",
-    "export": "تصدير…"
+    "export": "تصدير…",
+    "add-shared": "إضافة كمكتبة مشتركة",
+    "remove-shared": "إزالة كمكتبة مشتركة",
+    "pin-version": "تثبيت هذا الإصدار",
+    "version-history": "سجل الإصدارات",
+    "download-binary": "(.penpot) تنزيل ملف بنبوت",
+    "export-frames-pdf": "تصدير الإطارات كـ PDF…",
+    "reopen-tab": "إعادة فتح علامة التبويب المغلقة",
+    "recently-closed": "علامات التبويب المغلقة مؤخرًا",
+    "recently-closed-empty": "لا توجد علامات تبويب مغلقة مؤخرًا",
+    "copy-url": "نسخ رابط الملف",
+    "open-url": "فتح رابط الملف من الحافظة",
+    "invalid-url-title": "رابط Penpot غير صالح",
+    "invalid-url-body": "لا تحتوي الحافظة على رابط Penpot صالح."
   },
   "edit": {
     "edit": "تحرير",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "شكل",
     "tools": "أدوات",
-    "frame": "إطار",
+    "board": "إطار",
     "rectangle": "مستطيل",
     "ellipse": "شكل بيضاوي",
     "text": "نص",
@@ -122,6 +135,11 @@
     "website": "موقع Penpot",
     "release-notes": "ملاحظات الإصدار"
   },
+  "plugins": {
+    "plugins": "الإضافات",
+    "manager": "مدير الإضافات",
+    "no-plugins": "لا توجد إضافات مثبتة"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "واجهة محلية · خادم قابل للتكوين",
@@ -143,6 +161,8 @@
     "conn-failed": "فشل الاتصال",
     "cloud": "سحابة Penpot",
     "local": "محلي",
-    "dev": "تطوير"
+    "dev": "تطوير",
+    "restart-prompt": "إعادة تشغيل التطبيق لتطبيق اللغة الجديدة بالكامل؟",
+    "restart-later": "لاحقًا"
   }
 }

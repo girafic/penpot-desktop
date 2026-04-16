@@ -12,7 +12,20 @@
   "file": {
     "file": "File",
     "new-project": "Nuovo progetto",
-    "export": "Esporta forme…"
+    "export": "Esporta forme…",
+    "add-shared": "Aggiungi come libreria condivisa",
+    "remove-shared": "Rimuovi come libreria condivisa",
+    "pin-version": "Fissa questa versione",
+    "version-history": "Cronologia versioni",
+    "download-binary": "Scarica file Penpot (.penpot)",
+    "export-frames-pdf": "Esporta cornici come PDF…",
+    "reopen-tab": "Riapri scheda chiusa",
+    "recently-closed": "Schede chiuse di recente",
+    "recently-closed-empty": "Nessuna scheda chiusa di recente",
+    "copy-url": "Copia URL del file",
+    "open-url": "Apri URL dagli appunti",
+    "invalid-url-title": "URL Penpot non valido",
+    "invalid-url-body": "Gli appunti non contengono un URL Penpot valido."
   },
   "edit": {
     "edit": "Modifica",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Forma",
     "tools": "Strumenti",
-    "frame": "Cornice",
+    "board": "Cornice",
     "rectangle": "Rettangolo",
     "ellipse": "Ellisse",
     "text": "Testo",
@@ -122,6 +135,11 @@
     "website": "Sito web Penpot",
     "release-notes": "Note di rilascio"
   },
+  "plugins": {
+    "plugins": "Plugin",
+    "manager": "Gestore plugin",
+    "no-plugins": "Nessun plugin installato"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Frontend locale · Backend configurabile",
@@ -143,6 +161,8 @@
     "conn-failed": "Connessione fallita",
     "cloud": "Penpot Cloud",
     "local": "Locale",
-    "dev": "Sviluppo"
+    "dev": "Sviluppo",
+    "restart-prompt": "Riavviare l'app per applicare completamente la nuova lingua?",
+    "restart-later": "Più tardi"
   }
 }

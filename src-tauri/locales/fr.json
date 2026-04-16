@@ -12,7 +12,20 @@
   "file": {
     "file": "Fichier",
     "new-project": "Nouveau projet",
-    "export": "Exporter les formes…"
+    "export": "Exporter les formes…",
+    "add-shared": "Ajouter en tant que bibliothèque partagée",
+    "remove-shared": "Retirer de la bibliothèque partagée",
+    "pin-version": "Épingler cette version",
+    "version-history": "Historique des versions",
+    "download-binary": "Télécharger le fichier Penpot (.penpot)",
+    "export-frames-pdf": "Exporter les cadres en PDF…",
+    "reopen-tab": "Rouvrir l'onglet fermé",
+    "recently-closed": "Onglets récemment fermés",
+    "recently-closed-empty": "Aucun onglet récemment fermé",
+    "copy-url": "Copier l'URL du fichier",
+    "open-url": "Ouvrir l'URL du presse-papiers",
+    "invalid-url-title": "URL Penpot invalide",
+    "invalid-url-body": "Le presse-papiers ne contient pas d'URL Penpot valide."
   },
   "edit": {
     "edit": "Édition",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Forme",
     "tools": "Outils",
-    "frame": "Cadre",
+    "board": "Cadre",
     "rectangle": "Rectangle",
     "ellipse": "Ellipse",
     "text": "Texte",
@@ -122,6 +135,11 @@
     "website": "Site web Penpot",
     "release-notes": "Notes de version"
   },
+  "plugins": {
+    "plugins": "Plugins",
+    "manager": "Gestionnaire de plugins",
+    "no-plugins": "Aucun plugin installé"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Frontend local · Backend configurable",
@@ -143,6 +161,8 @@
     "conn-failed": "Échec de connexion",
     "cloud": "Penpot Cloud",
     "local": "Local",
-    "dev": "Développement"
+    "dev": "Développement",
+    "restart-prompt": "Redémarrer l'app pour appliquer complètement la nouvelle langue ?",
+    "restart-later": "Plus tard"
   }
 }

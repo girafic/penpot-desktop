@@ -12,7 +12,20 @@
   "file": {
     "file": "Bestand",
     "new-project": "Nieuw project",
-    "export": "Vormen exporteren…"
+    "export": "Vormen exporteren…",
+    "add-shared": "Toevoegen als gedeelde bibliotheek",
+    "remove-shared": "Verwijderen als gedeelde bibliotheek",
+    "pin-version": "Deze versie vastzetten",
+    "version-history": "Versiegeschiedenis",
+    "download-binary": "Penpot-bestand downloaden (.penpot)",
+    "export-frames-pdf": "Frames exporteren als PDF…",
+    "reopen-tab": "Gesloten tabblad heropenen",
+    "recently-closed": "Onlangs gesloten tabbladen",
+    "recently-closed-empty": "Geen onlangs gesloten tabbladen",
+    "copy-url": "Bestands-URL kopiëren",
+    "open-url": "Bestands-URL openen vanuit klembord",
+    "invalid-url-title": "Ongeldige Penpot-URL",
+    "invalid-url-body": "Het klembord bevat geen geldige Penpot-URL."
   },
   "edit": {
     "edit": "Bewerken",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Vorm",
     "tools": "Gereedschappen",
-    "frame": "Frame",
+    "board": "Board",
     "rectangle": "Rechthoek",
     "ellipse": "Ellips",
     "text": "Tekst",
@@ -122,6 +135,11 @@
     "website": "Penpot-website",
     "release-notes": "Releasenotities"
   },
+  "plugins": {
+    "plugins": "Plugins",
+    "manager": "Pluginbeheer",
+    "no-plugins": "Geen plugins geïnstalleerd"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Lokale frontend · Configureerbare backend",
@@ -143,6 +161,8 @@
     "conn-failed": "Verbinding mislukt",
     "cloud": "Penpot Cloud",
     "local": "Lokaal",
-    "dev": "Ontwikkeling"
+    "dev": "Ontwikkeling",
+    "restart-prompt": "App herstarten om de nieuwe taal volledig toe te passen?",
+    "restart-later": "Later"
   }
 }

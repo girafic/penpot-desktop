@@ -12,7 +12,20 @@
   "file": {
     "file": "Файл",
     "new-project": "Новий проєкт",
-    "export": "Експорт…"
+    "export": "Експорт…",
+    "add-shared": "Додати як спільну бібліотеку",
+    "remove-shared": "Видалити зі спільних бібліотек",
+    "pin-version": "Закріпити цю версію",
+    "version-history": "Історія версій",
+    "download-binary": "Завантажити файл Penpot (.penpot)",
+    "export-frames-pdf": "Експортувати фрейми в PDF…",
+    "reopen-tab": "Відкрити закриту вкладку",
+    "recently-closed": "Нещодавно закриті вкладки",
+    "recently-closed-empty": "Немає нещодавно закритих вкладок",
+    "copy-url": "Копіювати URL файлу",
+    "open-url": "Відкрити URL з буфера обміну",
+    "invalid-url-title": "Недійсний URL Penpot",
+    "invalid-url-body": "Буфер обміну не містить дійсний URL Penpot."
   },
   "edit": {
     "edit": "Редагування",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Фігура",
     "tools": "Інструменти",
-    "frame": "Фрейм",
+    "board": "Фрейм",
     "rectangle": "Прямокутник",
     "ellipse": "Еліпс",
     "text": "Текст",
@@ -122,6 +135,11 @@
     "website": "Сайт Penpot",
     "release-notes": "Примітки до випуску"
   },
+  "plugins": {
+    "plugins": "Плагіни",
+    "manager": "Менеджер плагінів",
+    "no-plugins": "Немає встановлених плагінів"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Локальний фронтенд · Налаштовуваний бекенд",
@@ -143,6 +161,8 @@
     "conn-failed": "Помилка підключення",
     "cloud": "Penpot Cloud",
     "local": "Локальний",
-    "dev": "Розробка"
+    "dev": "Розробка",
+    "restart-prompt": "Перезапустити додаток для повного застосування нової мови?",
+    "restart-later": "Пізніше"
   }
 }

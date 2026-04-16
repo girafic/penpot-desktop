@@ -12,7 +12,20 @@
   "file": {
     "file": "ファイル",
     "new-project": "新規プロジェクト",
-    "export": "エクスポート…"
+    "export": "エクスポート…",
+    "add-shared": "共有ライブラリとして追加",
+    "remove-shared": "共有ライブラリから削除",
+    "pin-version": "このバージョンを固定",
+    "version-history": "バージョン履歴",
+    "download-binary": "Penpotファイルをダウンロード (.penpot)",
+    "export-frames-pdf": "フレームをPDFとしてエクスポート…",
+    "reopen-tab": "閉じたタブを再度開く",
+    "recently-closed": "最近閉じたタブ",
+    "recently-closed-empty": "最近閉じたタブはありません",
+    "copy-url": "ファイルURLをコピー",
+    "open-url": "クリップボードからファイルURLを開く",
+    "invalid-url-title": "無効なPenpot URL",
+    "invalid-url-body": "クリップボードに有効なPenpot URLが含まれていません。"
   },
   "edit": {
     "edit": "編集",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "シェイプ",
     "tools": "ツール",
-    "frame": "フレーム",
+    "board": "フレーム",
     "rectangle": "四角形",
     "ellipse": "楕円",
     "text": "テキスト",
@@ -122,6 +135,11 @@
     "website": "Penpot ウェブサイト",
     "release-notes": "リリースノート"
   },
+  "plugins": {
+    "plugins": "プラグイン",
+    "manager": "プラグインマネージャー",
+    "no-plugins": "インストール済みのプラグインはありません"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "ローカルフロントエンド · 設定可能なバックエンド",
@@ -143,6 +161,8 @@
     "conn-failed": "接続失敗",
     "cloud": "Penpot Cloud",
     "local": "ローカル",
-    "dev": "開発"
+    "dev": "開発",
+    "restart-prompt": "新しい言語を完全に適用するためにアプリを再起動しますか？",
+    "restart-later": "後で"
   }
 }

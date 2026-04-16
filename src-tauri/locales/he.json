@@ -12,7 +12,20 @@
   "file": {
     "file": "קובץ",
     "new-project": "פרויקט חדש",
-    "export": "ייצוא…"
+    "export": "ייצוא…",
+    "add-shared": "הוספה כספרייה משותפת",
+    "remove-shared": "הסרה כספרייה משותפת",
+    "pin-version": "הצמדת גרסה זו",
+    "version-history": "היסטוריית גרסאות",
+    "download-binary": "(.penpot) הורדת קובץ Penpot",
+    "export-frames-pdf": "ייצוא מסגרות כ-PDF…",
+    "reopen-tab": "פתיחה מחדש של לשונית סגורה",
+    "recently-closed": "לשוניות שנסגרו לאחרונה",
+    "recently-closed-empty": "אין לשוניות שנסגרו לאחרונה",
+    "copy-url": "העתקת כתובת URL של הקובץ",
+    "open-url": "פתיחת כתובת URL מהלוח",
+    "invalid-url-title": "כתובת URL של Penpot לא תקינה",
+    "invalid-url-body": "הלוח אינו מכיל כתובת URL תקינה של Penpot."
   },
   "edit": {
     "edit": "עריכה",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "צורה",
     "tools": "כלים",
-    "frame": "מסגרת",
+    "board": "מסגרת",
     "rectangle": "מלבן",
     "ellipse": "אליפסה",
     "text": "טקסט",
@@ -122,6 +135,11 @@
     "website": "אתר Penpot",
     "release-notes": "הערות גרסה"
   },
+  "plugins": {
+    "plugins": "תוספים",
+    "manager": "מנהל תוספים",
+    "no-plugins": "אין תוספים מותקנים"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "חזית מקומית · שרת ניתן להגדרה",
@@ -143,6 +161,8 @@
     "conn-failed": "החיבור נכשל",
     "cloud": "ענן Penpot",
     "local": "מקומי",
-    "dev": "פיתוח"
+    "dev": "פיתוח",
+    "restart-prompt": "להפעיל מחדש את האפליקציה כדי להחיל את השפה החדשה במלואה?",
+    "restart-later": "מאוחר יותר"
   }
 }

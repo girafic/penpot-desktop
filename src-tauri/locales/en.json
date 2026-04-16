@@ -12,7 +12,20 @@
   "file": {
     "file": "File",
     "new-project": "New Project",
-    "export": "Export Shapes..."
+    "export": "Export Shapes...",
+    "add-shared": "Add as Shared Library",
+    "remove-shared": "Remove as Shared Library",
+    "pin-version": "Pin This Version",
+    "version-history": "Version History",
+    "download-binary": "Download Penpot File (.penpot)",
+    "export-frames-pdf": "Export Boards as PDF...",
+    "reopen-tab": "Reopen Closed Tab",
+    "recently-closed": "Recently Closed Tabs",
+    "recently-closed-empty": "No Recently Closed Tabs",
+    "copy-url": "Copy File URL",
+    "open-url": "Open File URL from Clipboard",
+    "invalid-url-title": "Invalid Penpot URL",
+    "invalid-url-body": "The clipboard does not contain a valid Penpot URL."
   },
   "edit": {
     "edit": "Edit",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Shape",
     "tools": "Tools",
-    "frame": "Frame",
+    "board": "Board",
     "rectangle": "Rectangle",
     "ellipse": "Ellipse",
     "text": "Text",
@@ -122,6 +135,11 @@
     "website": "Penpot Website",
     "release-notes": "Release Notes"
   },
+  "plugins": {
+    "plugins": "Plugins",
+    "manager": "Plugins Manager",
+    "no-plugins": "No Plugins Installed"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Local Penpot frontend · Configurable backend",
@@ -143,6 +161,8 @@
     "conn-failed": "Connection failed",
     "cloud": "Penpot Cloud",
     "local": "Local",
-    "dev": "Dev"
+    "dev": "Dev",
+    "restart-prompt": "Restart the app to fully apply the new language?",
+    "restart-later": "Later"
   }
 }

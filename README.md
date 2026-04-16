@@ -61,8 +61,8 @@ Native desktop app that runs the **real Penpot frontend locally**. The backend i
 
 ### Rendering
 
-- **WASM (GPU)** — Skia-based renderer, faster, requires WebGL2
 - **Classic (SVG)** — broader compatibility
+- **WASM (GPU)** — Skia-based renderer, faster, requires WebGL2
 - Configurable in settings (Cmd+,)
 
 ### Reverse Proxy
@@ -189,7 +189,7 @@ The URL is saved. On the next launch, the app connects automatically.
 
 | Shortcut | Action       |
 | -------- | ------------ |
-| B        | Frame        |
+| B        | Board        |
 | R        | Rectangle    |
 | E        | Ellipse      |
 | T        | Text         |

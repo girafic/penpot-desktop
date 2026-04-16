@@ -12,7 +12,20 @@
   "file": {
     "file": "Dosya",
     "new-project": "Yeni Proje",
-    "export": "Dışa aktar…"
+    "export": "Dışa aktar…",
+    "add-shared": "Paylaşılan kütüphane olarak ekle",
+    "remove-shared": "Paylaşılan kütüphaneden kaldır",
+    "pin-version": "Bu sürümü sabitle",
+    "version-history": "Sürüm geçmişi",
+    "download-binary": "Penpot dosyasını indir (.penpot)",
+    "export-frames-pdf": "Çerçeveleri PDF olarak dışa aktar…",
+    "reopen-tab": "Kapatılan sekmeyi yeniden aç",
+    "recently-closed": "Son kapatılan sekmeler",
+    "recently-closed-empty": "Son kapatılan sekme yok",
+    "copy-url": "Dosya URL'sini kopyala",
+    "open-url": "Panodan dosya URL'si aç",
+    "invalid-url-title": "Geçersiz Penpot URL'si",
+    "invalid-url-body": "Pano geçerli bir Penpot URL'si içermiyor."
   },
   "edit": {
     "edit": "Düzenle",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Şekil",
     "tools": "Araçlar",
-    "frame": "Çerçeve",
+    "board": "Çerçeve",
     "rectangle": "Dikdörtgen",
     "ellipse": "Elips",
     "text": "Metin",
@@ -122,6 +135,11 @@
     "website": "Penpot web sitesi",
     "release-notes": "Sürüm notları"
   },
+  "plugins": {
+    "plugins": "Eklentiler",
+    "manager": "Eklenti yöneticisi",
+    "no-plugins": "Yüklü eklenti yok"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Yerel frontend · Yapılandırılabilir backend",
@@ -143,6 +161,8 @@
     "conn-failed": "Bağlantı başarısız",
     "cloud": "Penpot Cloud",
     "local": "Yerel",
-    "dev": "Geliştirme"
+    "dev": "Geliştirme",
+    "restart-prompt": "Yeni dili tam olarak uygulamak için uygulamayı yeniden başlatılsın mı?",
+    "restart-later": "Daha sonra"
   }
 }

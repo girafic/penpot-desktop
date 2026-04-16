@@ -12,7 +12,20 @@
   "file": {
     "file": "Plik",
     "new-project": "Nowy projekt",
-    "export": "Eksportuj kształty…"
+    "export": "Eksportuj kształty…",
+    "add-shared": "Dodaj jako współdzieloną bibliotekę",
+    "remove-shared": "Usuń jako współdzieloną bibliotekę",
+    "pin-version": "Przypnij tę wersję",
+    "version-history": "Historia wersji",
+    "download-binary": "Pobierz plik Penpot (.penpot)",
+    "export-frames-pdf": "Eksportuj ramki jako PDF…",
+    "reopen-tab": "Otwórz ponownie zamkniętą kartę",
+    "recently-closed": "Ostatnio zamknięte karty",
+    "recently-closed-empty": "Brak ostatnio zamkniętych kart",
+    "copy-url": "Kopiuj URL pliku",
+    "open-url": "Otwórz URL ze schowka",
+    "invalid-url-title": "Nieprawidłowy URL Penpot",
+    "invalid-url-body": "Schowek nie zawiera prawidłowego URL Penpot."
   },
   "edit": {
     "edit": "Edycja",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Kształt",
     "tools": "Narzędzia",
-    "frame": "Ramka",
+    "board": "Ramka",
     "rectangle": "Prostokąt",
     "ellipse": "Elipsa",
     "text": "Tekst",
@@ -122,6 +135,11 @@
     "website": "Strona Penpot",
     "release-notes": "Informacje o wersji"
   },
+  "plugins": {
+    "plugins": "Wtyczki",
+    "manager": "Menedżer wtyczek",
+    "no-plugins": "Brak zainstalowanych wtyczek"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Lokalny frontend · Konfigurowalny backend",
@@ -143,6 +161,8 @@
     "conn-failed": "Połączenie nie powiodło się",
     "cloud": "Penpot Cloud",
     "local": "Lokalny",
-    "dev": "Programowanie"
+    "dev": "Programowanie",
+    "restart-prompt": "Uruchomić ponownie aplikację, aby w pełni zastosować nowy język?",
+    "restart-later": "Później"
   }
 }

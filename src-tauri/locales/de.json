@@ -12,7 +12,20 @@
   "file": {
     "file": "Datei",
     "new-project": "Neues Projekt",
-    "export": "Formen exportieren…"
+    "export": "Formen exportieren…",
+    "add-shared": "Als gemeinsam genutzte Bibliothek hinzufügen",
+    "remove-shared": "Als gemeinsam genutzte Bibliothek entfernen",
+    "pin-version": "Diese Version anheften",
+    "version-history": "Versionsverlauf",
+    "download-binary": "Penpot-Datei herunterladen (.penpot)",
+    "export-frames-pdf": "Zeichenflächen als PDF exportieren…",
+    "reopen-tab": "Geschlossenen Tab wieder eröffnen",
+    "recently-closed": "Kürzlich geschlossene Tabs",
+    "recently-closed-empty": "Keine kürzlich geschlossenen Tabs",
+    "copy-url": "Datei-URL kopieren",
+    "open-url": "Datei-URL aus der Zwischenablage öffnen",
+    "invalid-url-title": "Ungültige Penpot-URL",
+    "invalid-url-body": "Die Zwischenablage enthält keine gültige Penpot-URL."
   },
   "edit": {
     "edit": "Bearbeiten",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Form",
     "tools": "Werkzeuge",
-    "frame": "Rahmen",
+    "board": "Rahmen",
     "rectangle": "Rechteck",
     "ellipse": "Ellipse",
     "text": "Text",
@@ -122,6 +135,11 @@
     "website": "Penpot-Website",
     "release-notes": "Versionshinweise"
   },
+  "plugins": {
+    "plugins": "Plugins",
+    "manager": "Plugin-Verwaltung",
+    "no-plugins": "Keine Plugins installiert"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Lokales Penpot-Frontend · Backend konfigurierbar",
@@ -143,6 +161,8 @@
     "conn-failed": "Verbindung fehlgeschlagen",
     "cloud": "Penpot Cloud",
     "local": "Lokal",
-    "dev": "Entwicklung"
+    "dev": "Entwicklung",
+    "restart-prompt": "App neu starten, um die neue Sprache vollständig zu übernehmen?",
+    "restart-later": "Später"
   }
 }

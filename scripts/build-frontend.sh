@@ -188,6 +188,25 @@ build_frontend() {
         info "store.cljs already patched, skipping."
     fi
 
+    # Patch main_menu.cljs: add a stable id to the workspace burger button so
+    # the desktop file-menu helper can find and click it from JS.
+    MAIN_MENU_CLJS="$FRONTEND_DIR/src/app/main/ui/workspace/main_menu.cljs"
+    if ! grep -q "workspace-main-menu-button" "$MAIN_MENU_CLJS" 2>/dev/null; then
+        info "Patching main_menu.cljs with stable burger button id..."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' 's|:aria-label (tr "shortcut-subsection.main-menu")|:id "workspace-main-menu-button" :aria-label (tr "shortcut-subsection.main-menu")|' "$MAIN_MENU_CLJS"
+        else
+            sed -i 's|:aria-label (tr "shortcut-subsection.main-menu")|:id "workspace-main-menu-button" :aria-label (tr "shortcut-subsection.main-menu")|' "$MAIN_MENU_CLJS"
+        fi
+        if grep -q "workspace-main-menu-button" "$MAIN_MENU_CLJS"; then
+            ok "main_menu.cljs patched."
+        else
+            warn "main_menu.cljs patch failed — burger-button anchor not found."
+        fi
+    else
+        info "main_menu.cljs already patched, skipping."
+    fi
+
     # Step 1: Compile ClojureScript → JavaScript (main + worker)
     info "Compiling ClojureScript → JavaScript (production)..."
     pnpm run clear:shadow-cache || true
@@ -239,6 +258,12 @@ prepare_assets() {
 
     cp -r "$BUILT_DIR/"* "$OUTPUT_DIR/"
 
+    # ── Strip assets unused in desktop context ──────────────────
+    info "Removing images not needed for desktop..."
+    rm -rf "$OUTPUT_DIR/images/features"
+    rm -rf "$OUTPUT_DIR/images/email"
+    ok "Unused images removed."
+
     # Inject our config loader into index.html
     inject_config_loader
 
@@ -269,6 +294,84 @@ inject_config_loader() {
     fi
 
     ok "Config loader injected."
+
+    inject_file_menu_helper
+}
+
+# ── Inject the Tauri → Penpot file-menu helper ───────────────
+# Writes a small JS helper into the output dir and links it from index.html.
+# The helper exposes `window.__penpotDesktopFileAction(idOrIds)` which opens
+# Penpot's workspace burger menu, navigates into the File submenu, clicks the
+# requested `#file-menu-*` item, and closes the menu again. Used by the native
+# macOS File menu handlers in src-tauri/src/main.rs for actions that have no
+# Mousetrap shortcut in Penpot (pin version, download .penpot, export frames
+# as PDF, toggle shared library).
+inject_file_menu_helper() {
+    local INDEX="$OUTPUT_DIR/index.html"
+    local HELPER="$OUTPUT_DIR/__penpot_desktop_file_menu.js"
+
+    if [ ! -f "$INDEX" ]; then
+        return
+    fi
+
+    info "Writing file-menu helper and injecting <script> tag..."
+
+    cat > "$HELPER" <<'HELPER_EOF'
+// Penpot Desktop — File menu action helper.
+// Opens Penpot's workspace burger menu → File submenu, clicks a target
+// item by id, then closes. Invoked from the native macOS File menu for
+// actions that have no keyboard shortcut exposed by Penpot.
+(function () {
+  const wait = (predicate, timeout = 700) =>
+    new Promise((resolve, reject) => {
+      const start = performance.now();
+      const tick = () => {
+        const result = predicate();
+        if (result) return resolve(result);
+        if (performance.now() - start > timeout) return reject(new Error("timeout"));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+
+  const findAny = (ids) => {
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) return el;
+    }
+    return null;
+  };
+
+  window.__penpotDesktopFileAction = async function (targetIdOrIds) {
+    const ids = Array.isArray(targetIdOrIds) ? targetIdOrIds : [targetIdOrIds];
+    try {
+      const burger = document.getElementById("workspace-main-menu-button");
+      if (!burger) throw new Error("burger button not found");
+      burger.click();
+
+      const fileTrigger = await wait(() => document.getElementById("file-menu-file"));
+      fileTrigger.dispatchEvent(new PointerEvent("pointerenter", { bubbles: true }));
+      fileTrigger.click();
+
+      const target = await wait(() => findAny(ids));
+      target.click();
+    } catch (e) {
+      console.warn("[penpot-desktop] file-menu action failed:", ids.join("/"), e.message);
+    } finally {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    }
+  };
+})();
+HELPER_EOF
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's|</head>|<script src="/__penpot_desktop_file_menu.js"></script>\
+</head>|' "$INDEX"
+    else
+        sed -i 's|</head>|<script src="/__penpot_desktop_file_menu.js"></script>\n</head>|' "$INDEX"
+    fi
+
+    ok "File-menu helper injected."
 }
 
 # ── Main ─────────────────────────────────────────────────────

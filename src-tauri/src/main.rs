@@ -16,15 +16,19 @@ mod state;
 #[cfg(target_os = "macos")]
 use state::get_all_tab_groups;
 use state::{
-    forget_window_mode, get_window_mode, untrack_tab, APP_HANDLE, CURRENT_LANG, TAB_URLS,
+    archive_closed_tab, forget_window_mode, get_window_mode, pop_closed_tab, take_closed_tab_at,
+    untrack_tab, APP_HANDLE, CLOSED_TABS, CURRENT_LANG, PLUGINS, TAB_TITLES, TAB_URLS,
     WINDOW_MODES,
 };
 
 mod windows;
-use windows::{create_standalone_window, create_tab_window, safari_user_agent};
+use windows::{
+    create_standalone_window, create_tab_window, safari_user_agent, FILE_MENU_HELPER,
+    PLUGIN_LAUNCHER, PLUGIN_POLLER, WINDOW_OPEN_OVERRIDE,
+};
 
 mod menu;
-use menu::{build_menu, register_help_menu, update_selection_items};
+use menu::{build_menu, register_help_menu, register_window_menu, update_selection_items};
 
 mod commands;
 use commands::{get_proxy_url, save_download};
@@ -86,6 +90,17 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::Destroyed => {
+                    // Archive the closed tab's URL + title before untrack_tab
+                    // removes it — feeds "Reopen Closed Tab" / "Recently Closed".
+                    if let Some(list) = TAB_URLS.get() {
+                        if let Ok(v) = list.read() {
+                            if let Some((_, url)) =
+                                v.iter().find(|(l, _)| l == window.label())
+                            {
+                                archive_closed_tab(window.label(), url);
+                            }
+                        }
+                    }
                     untrack_tab(window.label());
                     forget_window_mode(window.label());
                 }
@@ -100,7 +115,10 @@ pub fn run() {
                             if let Ok((menu, _)) = build_menu(&app_for_closure, &mode) {
                                 let _ = app_for_closure.set_menu(menu);
                                 #[cfg(target_os = "macos")]
-                                register_help_menu();
+                                {
+                                    register_help_menu();
+                                    register_window_menu();
+                                }
                                 if mode == "workspace" {
                                     update_selection_items(&app_for_closure, 0, &[], &[]);
                                 }
@@ -115,6 +133,9 @@ pub fn run() {
             // Store app handle for proxy → menu communication
             APP_HANDLE.get_or_init(|| app.handle().clone());
             TAB_URLS.get_or_init(|| std::sync::RwLock::new(Vec::new()));
+            TAB_TITLES.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
+            CLOSED_TABS.get_or_init(|| std::sync::RwLock::new(std::collections::VecDeque::new()));
+            PLUGINS.get_or_init(|| std::sync::RwLock::new(Vec::new()));
             WINDOW_MODES.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
             CURRENT_LANG.get_or_init(|| std::sync::RwLock::new(initial_lang.clone()));
 
@@ -123,7 +144,10 @@ pub fn run() {
                 .expect("Failed to build menu");
             app.set_menu(initial_menu)?;
             #[cfg(target_os = "macos")]
-            register_help_menu();
+            {
+                register_help_menu();
+                register_window_menu();
+            }
 
             // Poll which window is currently focused and rebuild the menu
             // when it changes. macOS native tabs share one NSWindow, so
@@ -165,7 +189,10 @@ pub fn run() {
                         if let Ok((menu, _)) = build_menu(&app_clone, &mode_clone) {
                             let _ = app_clone.set_menu(menu);
                             #[cfg(target_os = "macos")]
-                            register_help_menu();
+                            {
+                                register_help_menu();
+                                register_window_menu();
+                            }
                             if mode_clone == "workspace" {
                                 update_selection_items(&app_clone, 0, &[], &[]);
                             }
@@ -196,6 +223,74 @@ pub fn run() {
                     }
                     "new-window" => {
                         let _ = create_standalone_window(app, port_for_menu, None);
+                        return;
+                    }
+                    "reopen-closed-tab" => {
+                        if let Some(tab) = pop_closed_tab() {
+                            let focused = app.webview_windows().into_iter()
+                                .find(|(_, w)| w.is_focused().unwrap_or(false))
+                                .map(|(l, _)| l);
+                            let _ = create_tab_window(app, port_for_menu, Some(&tab.url), focused.as_deref());
+                        }
+                        return;
+                    }
+                    "open-url-from-clipboard" => {
+                        use tauri_plugin_clipboard_manager::ClipboardExt;
+                        use tauri_plugin_dialog::DialogExt;
+                        let lang = menu::current_lang();
+                        let show_invalid = |app: &tauri::AppHandle| {
+                            app.dialog()
+                                .message(i18n::t(&lang, "file.invalid-url-body"))
+                                .title(i18n::t(&lang, "file.invalid-url-title"))
+                                .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+                                .blocking_show();
+                        };
+                        let text = match app.clipboard().read_text() {
+                            Ok(t) => t,
+                            Err(_) => {
+                                show_invalid(app);
+                                return;
+                            }
+                        };
+                        let trimmed = text.trim();
+                        let backend = app
+                            .try_state::<SharedConfig>()
+                            .and_then(|c| c.try_read().ok().map(|c| c.backend_url.clone()))
+                            .unwrap_or_default();
+                        let normalized = if trimmed.starts_with("http") {
+                            if backend.is_empty() {
+                                show_invalid(app);
+                                return;
+                            }
+                            let base = backend.trim_end_matches('/');
+                            if !trimmed.starts_with(base) {
+                                show_invalid(app);
+                                return;
+                            }
+                            state::normalize_tab_url(trimmed)
+                        } else if trimmed.starts_with("/#/") {
+                            trimmed.to_string()
+                        } else {
+                            show_invalid(app);
+                            return;
+                        };
+                        let focused = app.webview_windows().into_iter()
+                            .find(|(_, w)| w.is_focused().unwrap_or(false))
+                            .map(|(l, _)| l);
+                        let _ = create_tab_window(app, port_for_menu, Some(&normalized), focused.as_deref());
+                        return;
+                    }
+                    id if id.starts_with("reopen-closed-") => {
+                        // Matches "reopen-closed-<index>" — "reopen-closed-tab"
+                        // was already handled by the arm above.
+                        if let Ok(idx) = id.trim_start_matches("reopen-closed-").parse::<usize>() {
+                            if let Some(tab) = take_closed_tab_at(idx) {
+                                let focused = app.webview_windows().into_iter()
+                                    .find(|(_, w)| w.is_focused().unwrap_or(false))
+                                    .map(|(l, _)| l);
+                                let _ = create_tab_window(app, port_for_menu, Some(&tab.url), focused.as_deref());
+                            }
+                        }
                         return;
                     }
                     "help-guide" | "help-tutorials" | "help-courses" |
@@ -262,6 +357,79 @@ pub fn run() {
 
                     // File
                     "export" => "meta+shift+e",
+                    "show-version-history" => "meta+alt+h",
+
+                    // File — Penpot actions without a Mousetrap shortcut: open
+                    // Penpot's own File submenu and click the matching item.
+                    "pin-version" => {
+                        let _ = window.eval(
+                            "window.__penpotDesktopFileAction('file-menu-create-version')",
+                        );
+                        return;
+                    }
+                    "toggle-shared" => {
+                        let _ = window.eval(
+                            "window.__penpotDesktopFileAction(['file-menu-add-shared','file-menu-remove-shared'])",
+                        );
+                        return;
+                    }
+                    "download-binary" => {
+                        let _ = window.eval(
+                            "window.__penpotDesktopFileAction('file-menu-binary-file')",
+                        );
+                        return;
+                    }
+                    "export-frames-pdf" => {
+                        let _ = window.eval(
+                            "window.__penpotDesktopFileAction('file-menu-export-frames')",
+                        );
+                        return;
+                    }
+
+                    // Plugins
+                    "plugins-manager" => {
+                        let _ = window.eval(
+                            "window.__penpotDesktopOpenPluginManager()",
+                        );
+                        return;
+                    }
+                    id if id.starts_with("plugin-") => {
+                        if let Ok(idx) = id.trim_start_matches("plugin-").parse::<usize>() {
+                            let plugins = state::get_plugins();
+                            if let Some(plugin) = plugins.get(idx) {
+                                let name = plugin.name.replace('\\', "\\\\").replace('\'', "\\'");
+                                let js = format!(
+                                    "window.__penpotDesktopPluginAction('{name}')"
+                                );
+                                let _ = window.eval(&js);
+                            }
+                        }
+                        return;
+                    }
+
+                    "copy-file-url" => {
+                        // Combine the focused tab's stored path/hash with the
+                        // configured backend URL to produce a shareable link.
+                        let label = window.label().to_string();
+                        let path_hash = TAB_URLS
+                            .get()
+                            .and_then(|l| l.read().ok())
+                            .and_then(|v| {
+                                v.iter().find(|(l, _)| l == &label).map(|(_, u)| u.clone())
+                            });
+                        let Some(path_hash) = path_hash else { return };
+                        let backend = app
+                            .try_state::<SharedConfig>()
+                            .and_then(|c| c.try_read().ok().map(|c| c.backend_url.clone()));
+                        let Some(backend) = backend else { return };
+                        if backend.is_empty() {
+                            return;
+                        }
+                        let full = format!("{}{}", backend.trim_end_matches('/'), path_hash);
+                        use tauri_plugin_clipboard_manager::ClipboardExt;
+                        let _ = app.clipboard().write_text(full);
+                        return;
+                    }
 
                     // Edit — standard actions
                     "undo" => "meta+z",
@@ -323,7 +491,7 @@ pub fn run() {
                     "toggle-theme" => "alt+m",
 
                     // Shape tools
-                    "tool-frame" => "b",
+                    "tool-board" => "b",
                     "tool-rect" => "r",
                     "tool-ellipse" => "e",
                     "tool-text" => "t",
@@ -434,18 +602,22 @@ pub fn run() {
                         let _ = webview.eval(&format!(
                             "window.__penpotWindowLabel='{label}';\
                              if(!window.__penpotUrlTracker){{window.__penpotUrlTracker=true;\
-                               var __pptLastUrl='';\
+                               var __pptLastUrl='',__pptLastTitle='';\
                                setInterval(()=>{{\
-                                 if(location.href!==__pptLastUrl){{\
-                                   __pptLastUrl=location.href;\
+                                 if(location.href!==__pptLastUrl||document.title!==__pptLastTitle){{\
+                                   __pptLastUrl=location.href;__pptLastTitle=document.title;\
                                    navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                                     JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}}));\
+                                     JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}}));\
                                  }}\
                                }},2000);\
                                window.addEventListener('beforeunload',()=>\
                                  navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                                   JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}})));\
-                             }}"
+                                   JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}})));\
+                             }}\
+                             {WINDOW_OPEN_OVERRIDE}\
+                             {FILE_MENU_HELPER}\
+                             {PLUGIN_POLLER}\
+                             {PLUGIN_LAUNCHER}"
                         ));
                     }
                 })
@@ -632,6 +804,47 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Save current tab groups to config so the session can be restored after
+/// a restart (e.g. after a language change that requires re-launching the
+/// app to pick up the new AppleLanguages setting).
+pub fn save_session_state(app: &tauri::AppHandle, config: &SharedConfig) {
+    if let Some(list) = TAB_URLS.get() {
+        if let Ok(tab_map) = list.read() {
+            let url_map: HashMap<&str, &str> = tab_map
+                .iter()
+                .map(|(l, u)| (l.as_str(), u.as_str()))
+                .collect();
+
+            #[cfg(target_os = "macos")]
+            let label_groups = get_all_tab_groups(app);
+            #[cfg(not(target_os = "macos"))]
+            let label_groups: Vec<Vec<String>> = {
+                let _ = app;
+                tab_map.iter().map(|(l, _)| vec![l.clone()]).collect()
+            };
+
+            let groups: Vec<Vec<String>> = label_groups
+                .iter()
+                .map(|group| {
+                    group
+                        .iter()
+                        .filter_map(|label| url_map.get(label.as_str()).copied())
+                        .filter(|u| !u.is_empty() && !u.contains("__penpot_desktop"))
+                        .map(|u| u.to_string())
+                        .collect::<Vec<String>>()
+                })
+                .filter(|g| !g.is_empty())
+                .collect();
+
+            if let Ok(mut cfg) = config.try_write() {
+                cfg.open_groups = groups;
+                cfg.open_tabs.clear();
+                save_config(&cfg);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

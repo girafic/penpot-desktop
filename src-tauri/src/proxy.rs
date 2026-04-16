@@ -10,14 +10,44 @@ use tokio::sync::Mutex;
 use warp::Filter;
 
 use crate::config::{
-    desktop_to_penpot_locale, save_config, SharedConfig, DESKTOP_CONFIG_JS, IFRAME_SHIM_JS,
+    desktop_to_apple_locale, desktop_to_penpot_locale, save_config, SharedConfig,
+    DESKTOP_CONFIG_JS, IFRAME_SHIM_JS,
 };
 use crate::i18n;
-use crate::menu::{build_menu, register_help_menu, update_selection_items};
+use crate::menu::{build_menu, register_help_menu, register_window_menu, update_selection_items};
 use crate::state::{
-    focused_window_mode, get_window_mode, set_window_mode, track_tab_url, APP_HANDLE, CURRENT_LANG,
+    focused_window_mode, get_window_mode, set_window_mode, track_tab_title, track_tab_url,
+    update_plugins, PluginInfo, APP_HANDLE, CURRENT_LANG,
 };
 use crate::windows::create_tab_window;
+
+#[cfg(target_os = "macos")]
+fn set_apple_languages(lang: &str) {
+    unsafe {
+        use objc2::runtime::{AnyClass, AnyObject};
+        use std::ffi::CString;
+        let defaults: *mut AnyObject = objc2::msg_send![
+            AnyClass::get(c"NSUserDefaults").unwrap(),
+            standardUserDefaults
+        ];
+        let lang_cstr = CString::new(lang).unwrap();
+        let ns_lang: *mut AnyObject = objc2::msg_send![
+            AnyClass::get(c"NSString").unwrap(),
+            stringWithUTF8String: lang_cstr.as_ptr()
+        ];
+        let arr: *mut AnyObject = objc2::msg_send![
+            AnyClass::get(c"NSArray").unwrap(),
+            arrayWithObject: ns_lang
+        ];
+        let key = c"AppleLanguages";
+        let ns_key: *mut AnyObject = objc2::msg_send![
+            AnyClass::get(c"NSString").unwrap(),
+            stringWithUTF8String: key.as_ptr()
+        ];
+        let _: () = objc2::msg_send![defaults, setObject: arr, forKey: ns_key];
+        let _: () = objc2::msg_send![defaults, synchronize];
+    }
+}
 
 // ── Error deduplication ─────────────────────────────────────
 // Suppresses repeated identical proxy errors to avoid log spam
@@ -167,6 +197,17 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                             *l = lang.to_string();
                         }
                     }
+                    // Persist AppleLanguages so macOS system menu items use the
+                    // correct language on next launch — even without immediate restart.
+                    #[cfg(target_os = "macos")]
+                    {
+                        let apple_lang = desktop_to_apple_locale(lang).to_string();
+                        let _ = APP_HANDLE.get().map(|app| {
+                            let _ = app.run_on_main_thread(move || {
+                                set_apple_languages(&apple_lang);
+                            });
+                        });
+                    }
                     // Rebuild menus with new language
                     if let Some(app) = APP_HANDLE.get() {
                         let mode = focused_window_mode(app);
@@ -176,6 +217,7 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                             {
                                 app.run_on_main_thread(|| {
                                     register_help_menu();
+                                    register_window_menu();
                                 })
                                 .ok();
                             }
@@ -184,7 +226,6 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                         // via the updated navigator.language override in config.js
                         if desktop_to_penpot_locale(lang).is_some() {
                             for (_label, window) in app.webview_windows() {
-                                // Skip the settings page — it handles its own translations
                                 let is_settings = window
                                     .url()
                                     .map(|u| u.path().contains("__penpot_desktop"))
@@ -197,6 +238,53 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                             }
                         }
                     }
+                }
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+            }
+        });
+
+    // ── POST /__penpot_desktop/restart-app → show native confirm dialog with
+    // app icon, then save session + restart if confirmed.
+    let config_for_restart = config.clone();
+    let restart_app = warp::path!("__penpot_desktop" / "restart-app")
+        .and(warp::post())
+        .and_then(move || {
+            let cfg = config_for_restart.clone();
+            async move {
+                if let Some(app) = APP_HANDLE.get() {
+                    let lang = cfg.read().await.language.clone();
+                    let app_for_dialog = app.clone();
+                    let cfg_for_restart = cfg.clone();
+
+                    // Show the dialog on the main thread (required for native UI)
+                    let _ = app.run_on_main_thread(move || {
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                        let msg = crate::i18n::t(&lang, "settings.restart-prompt");
+                        let cancel = crate::i18n::t(&lang, "settings.restart-later");
+
+                        let confirmed = app_for_dialog
+                            .dialog()
+                            .message(&msg)
+                            .title("Penpot Desktop")
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "OK".into(),
+                                cancel,
+                            ))
+                            .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+                            .blocking_show();
+
+                        if confirmed {
+                            let app_clone = app_for_dialog.clone();
+                            let cfg_clone = cfg_for_restart.clone();
+                            std::thread::spawn(move || {
+                                crate::save_session_state(&app_clone, &cfg_clone);
+                                if let Ok(exe) = std::env::current_exe() {
+                                    let _ = std::process::Command::new(exe).spawn();
+                                }
+                                std::process::exit(0);
+                            });
+                        }
+                    });
                 }
                 Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
             }
@@ -238,6 +326,7 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                             {
                                 app.run_on_main_thread(|| {
                                     register_help_menu();
+                                    register_window_menu();
                                 })
                                 .ok();
                             }
@@ -273,7 +362,10 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                             if let Ok((menu, _)) = build_menu(&app_handle, &mode) {
                                 let _ = app_handle.set_menu(menu);
                                 #[cfg(target_os = "macos")]
-                                register_help_menu();
+                                {
+                                    register_help_menu();
+                                    register_window_menu();
+                                }
                                 if mode == "workspace" {
                                     update_selection_items(&app_handle, 0, &[], &[]);
                                 }
@@ -404,14 +496,43 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                         } else {
                             let app_for_run = app.clone();
                             let app_for_tab = app.clone();
+                            let focused = app
+                                .webview_windows()
+                                .into_iter()
+                                .find(|(_, w)| w.is_focused().unwrap_or(false))
+                                .map(|(l, _)| l);
                             let _ = app_for_run.run_on_main_thread(move || {
-                                let _ = create_tab_window(&app_for_tab, port, Some(&url), None);
+                                let _ = create_tab_window(
+                                    &app_for_tab,
+                                    port,
+                                    Some(&url),
+                                    focused.as_deref(),
+                                );
                             });
                         }
                     }
                 }
                 Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
             }
+        });
+
+    // ── POST /__penpot_desktop/update-plugins → receive installed plugin list from JS poller
+    let update_plugins_ep = warp::path!("__penpot_desktop" / "update-plugins")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| async move {
+            if let Some(arr) = body.get("plugins").and_then(|v| v.as_array()) {
+                let plugins: Vec<PluginInfo> = arr
+                    .iter()
+                    .filter_map(|p| {
+                        let id = p.get("id")?.as_str()?.to_string();
+                        let name = p.get("name")?.as_str()?.to_string();
+                        Some(PluginInfo { id, name })
+                    })
+                    .collect();
+                update_plugins(plugins);
+            }
+            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
         });
 
     // ── POST /__penpot_desktop/update-tab-url → track tab URL for session restore
@@ -426,6 +547,11 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                     body.get("url").and_then(|v| v.as_str()),
                 ) {
                     track_tab_url(label, url);
+                    if let Some(title) = body.get("title").and_then(|v| v.as_str()) {
+                        if !title.is_empty() {
+                            track_tab_title(label, title);
+                        }
+                    }
                 }
             }
             Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
@@ -831,9 +957,11 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         .or(set_selection)
         .or(get_clipboard)
         .or(set_language)
+        .or(restart_app)
         .or(get_translations)
         .or(set_title)
         .or(open_tab)
+        .or(update_plugins_ep)
         .or(update_tab_url)
         .or(cors_proxy)
         .or(settings_page)

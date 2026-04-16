@@ -7,6 +7,115 @@ use tauri::Manager;
 
 static TAB_COUNTER: AtomicU32 = AtomicU32::new(1);
 
+/// JS helper injected into every Penpot webview on page load. Exposes
+/// `window.__penpotDesktopFileAction(idOrIds)` which opens Penpot's
+/// workspace burger menu → File submenu, clicks the target `#file-menu-*`
+/// item, then closes the menu. Used by the native File menu handlers for
+/// actions that have no Mousetrap shortcut (pin version, download .penpot,
+/// export frames as PDF, toggle shared library).
+/// Overrides `window.open()` so that Penpot's "Open in new tab/window"
+/// actions (viewer, inspect, etc.) create a proper Tauri tab instead of
+/// navigating in-place or being blocked by WKWebView.
+pub const WINDOW_OPEN_OVERRIDE: &str = "\
+if(!window.__penpotOpenPatched){window.__penpotOpenPatched=true;\
+  var _origOpen=window.open.bind(window);\
+  window.open=function(url,name,features){\
+    if(url&&String(url).indexOf('127.0.0.1')!==-1){\
+      fetch('/__penpot_desktop/open-tab',{method:'POST',\
+        headers:{'Content-Type':'application/json'},\
+        body:JSON.stringify({url:String(url)})});return null}\
+    return _origOpen(url,name,features)};}";
+
+/// Polls the Penpot profile API for installed plugins and reports them
+/// to the desktop wrapper. Runs once after 3 s, then every 30 s.
+pub const PLUGIN_POLLER: &str = "\
+if(!window.__penpotPluginPoller){window.__penpotPluginPoller=true;\
+  function __pptParse(v){\
+    if(typeof v==='string'){try{v=JSON.parse(v)}catch(e){return v}}\
+    if(Array.isArray(v)&&v[0]==='^ '){\
+      var o={};for(var i=1;i<v.length;i+=2)o[v[i]]=__pptParse(v[i+1]);return o}\
+    if(Array.isArray(v))return v.map(__pptParse);\
+    return v}\
+  function __pptPollPlugins(){\
+    fetch('/api/main/methods/get-profile',{\
+      headers:{'accept':'application/transit+json'},\
+      credentials:'include'})\
+    .then(function(r){return r.text()})\
+    .then(function(t){try{\
+      var j=__pptParse(t);\
+      var pl=__pptParse(j['~:props']);\
+      pl=__pptParse(pl['~:plugins']);\
+      var d=__pptParse(pl['~:data']);\
+      var dk=Object.keys(d||{});\
+      var cacheMap={};\
+      if(dk.length>1){var fk=Object.keys(d[dk[0]]||{}),sk=Object.keys(d[dk[1]]||{});\
+        for(var ci=0;ci<sk.length&&ci<fk.length;ci++)\
+          if(sk[ci][0]==='^')cacheMap[sk[ci]]=fk[ci]}\
+      function resolveKeys(obj){if(!obj||typeof obj!=='object')return obj;\
+        var r={};Object.keys(obj).forEach(function(k){\
+          r[cacheMap[k]||k]=obj[k]});return r}\
+      var list=dk.map(function(k){\
+        var e=resolveKeys(__pptParse(d[k]))||{};\
+        return{id:e['~:plugin-id']||k,name:e['~:name']||''}})\
+        .filter(function(p){return p.name});\
+      fetch('/__penpot_desktop/update-plugins',{method:'POST',\
+        headers:{'Content-Type':'application/json'},\
+        body:JSON.stringify({plugins:list})})\
+    }catch(e){console.warn('[penpot-desktop] plugin poll error:',e)}})\
+    .catch(function(e){console.warn('[penpot-desktop] plugin fetch error:',e)})}\
+  setTimeout(__pptPollPlugins,3000);\
+  setInterval(__pptPollPlugins,30000);}";
+
+/// Opens burger → Plugins submenu → clicks the Nth plugin item.
+pub const PLUGIN_LAUNCHER: &str = "\
+if(!window.__penpotDesktopPluginAction){(function(){\
+  function poll(fn,ms){return new Promise(function(ok,no){\
+    var t=Date.now();(function f(){var r=fn();if(r)return ok(r);\
+    if(Date.now()-t>ms)return no();requestAnimationFrame(f)})()})}\
+  window.__penpotDesktopPluginAction=function(name){\
+    var btn=document.querySelector('[class*=\"menu-section\"] button');\
+    if(!btn)return;\
+    btn.click();\
+    poll(function(){return document.querySelector('[data-testid=\"plugins\"]')},800)\
+    .then(function(p){p.click();\
+      return poll(function(){\
+        var items=document.querySelectorAll('[class*=\"plugins\"] [class*=\"submenu-item\"]');\
+        for(var i=0;i<items.length;i++){\
+          if(items[i].textContent.trim()===name)return items[i]}\
+        return null},800)})\
+    .then(function(t){t.click()})\
+    .catch(function(){})};\
+  window.__penpotDesktopOpenPluginManager=function(){\
+    var btn=document.querySelector('[class*=\"menu-section\"] button');\
+    if(!btn)return;\
+    btn.click();\
+    poll(function(){return document.querySelector('[data-testid=\"plugins\"]')},800)\
+    .then(function(p){p.click();\
+      return poll(function(){return document.getElementById('file-menu-open-plugins')},800)})\
+    .then(function(t){t.click()})\
+    .catch(function(){})};\
+})();}";
+
+pub const FILE_MENU_HELPER: &str = "\
+if(!window.__penpotDesktopFileAction){(function(){\
+  function poll(fn,ms){return new Promise(function(ok,no){\
+    var t=Date.now();(function f(){var r=fn();if(r)return ok(r);\
+    if(Date.now()-t>ms)return no();requestAnimationFrame(f)})()})}\
+  function any(ids){for(var i=0;i<ids.length;i++){\
+    var e=document.getElementById(ids[i]);if(e)return e}return null}\
+  window.__penpotDesktopFileAction=function(raw){\
+    var ids=Array.isArray(raw)?raw:[raw];\
+    var btn=document.querySelector('[class*=\"menu-section\"] button');\
+    if(!btn)return;\
+    btn.click();\
+    poll(function(){return document.getElementById('file-menu-file')},800)\
+    .then(function(f){f.click();\
+      return poll(function(){return any(ids)},800)})\
+    .then(function(t){t.click()})\
+    .catch(function(){})};\
+})();}";
+
+
 pub fn create_tab_window(
     app: &tauri::AppHandle,
     port: u16,
@@ -72,18 +181,22 @@ pub fn create_tab_window(
                 "window.__penpotWindowLabel='{lbl}';\
                  {restore_js}\
                  if(!window.__penpotUrlTracker){{window.__penpotUrlTracker=true;\
-                   var __pptLastUrl='';\
+                   var __pptLastUrl='',__pptLastTitle='';\
                    setInterval(()=>{{\
-                     if(location.href!==__pptLastUrl){{\
-                       __pptLastUrl=location.href;\
+                     if(location.href!==__pptLastUrl||document.title!==__pptLastTitle){{\
+                       __pptLastUrl=location.href;__pptLastTitle=document.title;\
                        navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                         JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}}));\
+                         JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}}));\
                      }}\
                    }},2000);\
                    window.addEventListener('beforeunload',()=>\
                      navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                       JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}})));\
-                 }}"
+                       JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}})));\
+                 }}\
+                 {WINDOW_OPEN_OVERRIDE}\
+                 {FILE_MENU_HELPER}\
+                 {PLUGIN_POLLER}\
+                 {PLUGIN_LAUNCHER}"
             ));
         }
     })
@@ -225,18 +338,22 @@ pub fn create_standalone_window(
                 "window.__penpotWindowLabel='{lbl}';\
                  {restore_js}\
                  if(!window.__penpotUrlTracker){{window.__penpotUrlTracker=true;\
-                   var __pptLastUrl='';\
+                   var __pptLastUrl='',__pptLastTitle='';\
                    setInterval(()=>{{\
-                     if(location.href!==__pptLastUrl){{\
-                       __pptLastUrl=location.href;\
+                     if(location.href!==__pptLastUrl||document.title!==__pptLastTitle){{\
+                       __pptLastUrl=location.href;__pptLastTitle=document.title;\
                        navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                         JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}}));\
+                         JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}}));\
                      }}\
                    }},2000);\
                    window.addEventListener('beforeunload',()=>\
                      navigator.sendBeacon('/__penpot_desktop/update-tab-url',\
-                       JSON.stringify({{label:window.__penpotWindowLabel,url:location.href}})));\
-                 }}"
+                       JSON.stringify({{label:window.__penpotWindowLabel,url:location.href,title:document.title}})));\
+                 }}\
+                 {WINDOW_OPEN_OVERRIDE}\
+                 {FILE_MENU_HELPER}\
+                 {PLUGIN_POLLER}\
+                 {PLUGIN_LAUNCHER}"
             ));
         }
     });

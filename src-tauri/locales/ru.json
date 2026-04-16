@@ -12,7 +12,20 @@
   "file": {
     "file": "Файл",
     "new-project": "Новый проект",
-    "export": "Экспорт…"
+    "export": "Экспорт…",
+    "add-shared": "Добавить как общую библиотеку",
+    "remove-shared": "Удалить из общих библиотек",
+    "pin-version": "Закрепить эту версию",
+    "version-history": "История версий",
+    "download-binary": "Скачать файл Penpot (.penpot)",
+    "export-frames-pdf": "Экспортировать фреймы в PDF…",
+    "reopen-tab": "Открыть закрытую вкладку",
+    "recently-closed": "Недавно закрытые вкладки",
+    "recently-closed-empty": "Нет недавно закрытых вкладок",
+    "copy-url": "Копировать URL файла",
+    "open-url": "Открыть URL из буфера обмена",
+    "invalid-url-title": "Недействительный URL Penpot",
+    "invalid-url-body": "Буфер обмена не содержит действительный URL Penpot."
   },
   "edit": {
     "edit": "Редактирование",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "Фигура",
     "tools": "Инструменты",
-    "frame": "Рамка",
+    "board": "Рамка",
     "rectangle": "Прямоугольник",
     "ellipse": "Эллипс",
     "text": "Текст",
@@ -122,6 +135,11 @@
     "website": "Сайт Penpot",
     "release-notes": "Изменения"
   },
+  "plugins": {
+    "plugins": "Плагины",
+    "manager": "Менеджер плагинов",
+    "no-plugins": "Нет установленных плагинов"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "Локальный фронтенд · Настраиваемый бэкенд",
@@ -143,6 +161,8 @@
     "conn-failed": "Ошибка подключения",
     "cloud": "Penpot Cloud",
     "local": "Локальный",
-    "dev": "Разработка"
+    "dev": "Разработка",
+    "restart-prompt": "Перезапустить приложение для полного применения нового языка?",
+    "restart-later": "Позже"
   }
 }

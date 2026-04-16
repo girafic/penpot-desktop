@@ -35,6 +35,31 @@ fn default_language() -> String {
     "en".into()
 }
 
+/// Map desktop locale codes to Apple locale codes for `AppleLanguages`.
+pub fn desktop_to_apple_locale(desktop: &str) -> &'static str {
+    match desktop {
+        "en" => "en",
+        "de" => "de",
+        "es" => "es",
+        "fr" => "fr",
+        "it" => "it",
+        "tr" => "tr",
+        "ru" => "ru",
+        "ko" => "ko",
+        "ar" => "ar",
+        "ca" => "ca",
+        "nl" => "nl",
+        "pl" => "pl",
+        "ro" => "ro",
+        "he" => "he",
+        "pt_BR" => "pt-BR",
+        "jpn_JP" => "ja",
+        "ukr_UA" => "uk",
+        "zh_CN" => "zh-Hans",
+        _ => "en",
+    }
+}
+
 /// Map desktop locale codes to Penpot frontend locale codes.
 pub fn desktop_to_penpot_locale(desktop: &str) -> Option<&'static str> {
     match desktop {

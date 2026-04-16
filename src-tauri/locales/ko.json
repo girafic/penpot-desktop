@@ -12,7 +12,20 @@
   "file": {
     "file": "파일",
     "new-project": "새 프로젝트",
-    "export": "내보내기…"
+    "export": "내보내기…",
+    "add-shared": "공유 라이브러리로 추가",
+    "remove-shared": "공유 라이브러리에서 제거",
+    "pin-version": "이 버전 고정",
+    "version-history": "버전 기록",
+    "download-binary": "Penpot 파일 다운로드 (.penpot)",
+    "export-frames-pdf": "프레임을 PDF로 내보내기…",
+    "reopen-tab": "닫은 탭 다시 열기",
+    "recently-closed": "최근에 닫은 탭",
+    "recently-closed-empty": "최근에 닫은 탭 없음",
+    "copy-url": "파일 URL 복사",
+    "open-url": "클립보드에서 파일 URL 열기",
+    "invalid-url-title": "잘못된 Penpot URL",
+    "invalid-url-body": "클립보드에 유효한 Penpot URL이 없습니다."
   },
   "edit": {
     "edit": "편집",
@@ -63,7 +76,7 @@
   "shape": {
     "shape": "도형",
     "tools": "도구",
-    "frame": "프레임",
+    "board": "프레임",
     "rectangle": "사각형",
     "ellipse": "타원",
     "text": "텍스트",
@@ -122,6 +135,11 @@
     "website": "Penpot 웹사이트",
     "release-notes": "릴리스 노트"
   },
+  "plugins": {
+    "plugins": "플러그인",
+    "manager": "플러그인 관리자",
+    "no-plugins": "설치된 플러그인 없음"
+  },
   "settings": {
     "title": "Penpot Desktop",
     "subtitle": "로칼 프론트엔드 · 설정 가능한 백엔드",
@@ -143,6 +161,8 @@
     "conn-failed": "연결 실패",
     "cloud": "Penpot Cloud",
     "local": "로칼",
-    "dev": "개발"
+    "dev": "개발",
+    "restart-prompt": "새 언어를 완전히 적용하려면 앱을 다시 시작하시겠습니까?",
+    "restart-later": "나중에"
   }
 }

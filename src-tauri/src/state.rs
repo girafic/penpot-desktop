@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 use tauri::Manager;
 
@@ -9,6 +9,106 @@ pub static CURRENT_LANG: OnceLock<std::sync::RwLock<String>> = OnceLock::new();
 
 // Ordered list of (label, url) — preserves tab order for session restore
 pub static TAB_URLS: OnceLock<std::sync::RwLock<Vec<(String, String)>>> = OnceLock::new();
+
+// Per-tab document title — updated by the same polling script that feeds TAB_URLS.
+// Used for human-readable labels in the "Recently Closed Tabs" submenu.
+pub static TAB_TITLES: OnceLock<std::sync::RwLock<HashMap<String, String>>> = OnceLock::new();
+
+// Recently closed tabs (LIFO), capped at CLOSED_TABS_CAP. Populated on
+// WindowEvent::Destroyed before the label is untracked, drained by the File
+// menu's "Reopen Closed Tab" and "Recently Closed Tabs" handlers.
+#[derive(Clone, Debug)]
+pub struct ClosedTab {
+    pub url: String,
+    pub title: String,
+}
+
+pub static CLOSED_TABS: OnceLock<std::sync::RwLock<VecDeque<ClosedTab>>> = OnceLock::new();
+const CLOSED_TABS_CAP: usize = 10;
+
+pub fn track_tab_title(label: &str, title: &str) {
+    if let Some(map) = TAB_TITLES.get() {
+        if let Ok(mut m) = map.write() {
+            m.insert(label.to_string(), title.to_string());
+        }
+    }
+}
+
+pub fn archive_closed_tab(label: &str, url: &str) {
+    if url.contains("__penpot_desktop") {
+        return;
+    }
+    let title = TAB_TITLES
+        .get()
+        .and_then(|m| m.read().ok())
+        .and_then(|m| m.get(label).cloned())
+        .unwrap_or_default();
+    if let Some(stack) = CLOSED_TABS.get() {
+        if let Ok(mut q) = stack.write() {
+            q.push_back(ClosedTab {
+                url: url.to_string(),
+                title,
+            });
+            while q.len() > CLOSED_TABS_CAP {
+                q.pop_front();
+            }
+        }
+    }
+}
+
+pub fn pop_closed_tab() -> Option<ClosedTab> {
+    CLOSED_TABS
+        .get()
+        .and_then(|s| s.write().ok())
+        .and_then(|mut q| q.pop_back())
+}
+
+pub fn take_closed_tab_at(index: usize) -> Option<ClosedTab> {
+    let stack = CLOSED_TABS.get()?;
+    let mut q = stack.write().ok()?;
+    // Index 0 refers to the most-recently-closed — translate to VecDeque's
+    // chronological order by reversing.
+    let len = q.len();
+    if index >= len {
+        return None;
+    }
+    let actual = len - 1 - index;
+    q.remove(actual)
+}
+
+pub fn get_closed_tabs() -> Vec<ClosedTab> {
+    CLOSED_TABS
+        .get()
+        .and_then(|s| s.read().ok())
+        .map(|q| q.iter().rev().cloned().collect())
+        .unwrap_or_default()
+}
+
+// Installed Penpot plugins — polled from the profile API and used to
+// build the dynamic Plugins submenu.
+#[derive(Clone, Debug)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+}
+
+pub static PLUGINS: OnceLock<std::sync::RwLock<Vec<PluginInfo>>> = OnceLock::new();
+
+pub fn update_plugins(plugins: Vec<PluginInfo>) {
+    if let Some(list) = PLUGINS.get() {
+        if let Ok(mut v) = list.write() {
+            *v = plugins;
+        }
+    }
+}
+
+pub fn get_plugins() -> Vec<PluginInfo> {
+    PLUGINS
+        .get()
+        .and_then(|l| l.read().ok())
+        .map(|v| v.clone())
+        .unwrap_or_default()
+}
 
 // Per-window menu mode ("dashboard" / "workspace") — needed so the menu
 // reflects whichever window currently has focus, not whichever window last
@@ -164,6 +264,11 @@ pub fn untrack_tab(label: &str) {
     if let Some(list) = TAB_URLS.get() {
         if let Ok(mut v) = list.write() {
             v.retain(|(l, _)| l != label);
+        }
+    }
+    if let Some(map) = TAB_TITLES.get() {
+        if let Ok(mut m) = map.write() {
+            m.remove(label);
         }
     }
 }
