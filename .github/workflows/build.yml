@@ -66,7 +66,8 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            xdg-utils
 
       - name: Install Windows build tools
         if: runner.os == 'Windows'
