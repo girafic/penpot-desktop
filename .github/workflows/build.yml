@@ -67,26 +67,29 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Setup Clojure
+      - name: Setup Clojure (macOS/Linux)
+        if: runner.os != 'Windows'
         uses: DeLaGuardo/setup-clojure@12.5
         with:
           cli: latest
 
-      - name: Create Clojure bash wrapper (Windows)
+      - name: Setup Clojure (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          # DeLaGuardo/setup-clojure installs a PowerShell *module* (ClojureTools)
-          # that exports clojure/clj as functions — not standalone scripts.
-          # Create a bash wrapper that loads the module and calls the function.
+          # DeLaGuardo/setup-clojure installs a PowerShell module on Windows,
+          # which doesn't work in Git Bash. Use deps.clj instead — a native
+          # drop-in replacement for the Clojure CLI that works in any shell.
           BIN_DIR="$HOME/bin"
           mkdir -p "$BIN_DIR"
-          echo '#!/bin/bash' > "$BIN_DIR/clojure"
-          echo 'CWD=$(cygpath -w "$(pwd)")' >> "$BIN_DIR/clojure"
-          echo 'exec powershell.exe -ExecutionPolicy Bypass -Command "Set-Location -LiteralPath '"'"'$CWD'"'"'; clojure $*"' >> "$BIN_DIR/clojure"
-          chmod +x "$BIN_DIR/clojure"
-          cat "$BIN_DIR/clojure"
+          LATEST=$(curl -sI https://github.com/borkdude/deps.clj/releases/latest | grep -i ^location | sed 's/.*tag\///' | tr -d '\r\n')
+          VERSION="${LATEST#v}"
+          curl -sL "https://github.com/borkdude/deps.clj/releases/download/${LATEST}/deps.clj-${VERSION}-windows-amd64.zip" -o /tmp/deps-clj.zip
+          unzip -o /tmp/deps-clj.zip -d "$BIN_DIR"
+          # deps.exe is a drop-in for clojure — create copies so both names work
+          cp "$BIN_DIR/deps.exe" "$BIN_DIR/clojure.exe"
           echo "$BIN_DIR" >> "$GITHUB_PATH"
+          "$BIN_DIR/deps.exe" --version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
