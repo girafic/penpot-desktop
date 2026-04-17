@@ -192,6 +192,8 @@ jobs:
           generate_release_notes: true
           draft: false
           files: |
-            artifacts/penpot-desktop-macos/*
-            artifacts/penpot-desktop-linux/*
-            artifacts/penpot-desktop-windows/*
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.msi
+            artifacts/**/*.exe
