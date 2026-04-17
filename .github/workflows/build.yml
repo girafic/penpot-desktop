@@ -36,7 +36,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── System dependencies (Linux only) ──────────────────────
+      # ── System dependencies ────────────────────────────────────
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
         run: |
@@ -51,6 +51,11 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
+
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install rsync -y
 
       # ── Toolchains ────────────────────────────────────────────
       - name: Setup Rust
