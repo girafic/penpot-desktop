@@ -12,11 +12,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PENPOT_BRANCH: "2.14.2"
-
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      penpot-version: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Get latest Penpot release tag
+        id: version
+        run: |
+          TAG=$(curl -sI https://github.com/penpot/penpot/releases/latest | grep -i ^location | sed 's/.*tag\///' | tr -d '\r\n')
+          echo "tag=$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: resolve-version
     strategy:
       fail-fast: false
       matrix:
@@ -124,7 +134,7 @@ jobs:
       - name: Build Penpot frontend
         run: bun run build-frontend
         env:
-          PENPOT_BRANCH: ${{ env.PENPOT_BRANCH }}
+          PENPOT_BRANCH: ${{ needs.resolve-version.outputs.penpot-version }}
 
       - name: Build Tauri app
         run: bun run tauri:build
