@@ -33,8 +33,6 @@ jobs:
         include:
           - os: macos-latest
             label: macOS
-          - os: macos-13
-            label: macOS Intel
           - os: ubuntu-22.04
             label: Linux
           - os: ubuntu-22.04-arm
@@ -77,6 +75,8 @@ jobs:
       # ── Toolchains ────────────────────────────────────────────
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -146,14 +146,27 @@ jobs:
       - name: Build Tauri app
         run: bun run tauri:build
 
+      - name: Build Tauri app (macOS Universal)
+        if: runner.os == 'macOS'
+        run: bun run tauri:build -- --target universal-apple-darwin
+
       # ── Upload artifacts (always, for PR/branch builds) ───────
-      - name: Upload macOS artifacts
+      - name: Upload macOS ARM artifacts
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: penpot-desktop-${{ matrix.label == 'macOS Intel' && 'macos-x64' || 'macos-arm64' }}
+          name: penpot-desktop-macos-arm64
           path: |
             src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Upload macOS Universal artifacts
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: penpot-desktop-macos-universal
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
       - name: Upload Linux artifacts
