@@ -153,6 +153,27 @@ build_frontend() {
         fi
     fi
 
+    # Patch _worker.js: fix CSS module class names on Windows.
+    # On Windows, path.dirname() returns backslashes which break the "/" split
+    # used to build scoped class names. Normalize to forward slashes.
+    WORKER_JS="$FRONTEND_DIR/scripts/_worker.js"
+    if grep -q 'const dir = ph.dirname(filename);' "$WORKER_JS" 2>/dev/null; then
+        info "Patching _worker.js for Windows path separators..."
+        FRONTEND_DIR="$FRONTEND_DIR" node <<'PATCH_EOF'
+const fs = require("fs");
+const file = process.env.FRONTEND_DIR + "/scripts/_worker.js";
+let src = fs.readFileSync(file, "utf8");
+src = src.replace(
+  "const dir = ph.dirname(filename);",
+  'const dir = ph.dirname(filename).replaceAll("\\\\", "/");'
+);
+fs.writeFileSync(file, src);
+PATCH_EOF
+        ok "_worker.js patched."
+    else
+        info "_worker.js already patched or not found, skipping."
+    fi
+
     # Patch store.cljs: add desktop selection bridge
     # (no-op when __penpotDesktopOnSelection is not defined, i.e. in browser)
     STORE_CLJS="$FRONTEND_DIR/src/app/main/store.cljs"

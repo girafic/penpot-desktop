@@ -1,6 +1,6 @@
 [package]
 name = "penpot-desktop"
-version = "1.0.1"
+version = "1.0.2"
 description = "Penpot Desktop – Standalone Penpot Frontend in Tauri"
 authors = ["Stas Haas"]
 edition = "2021"
