@@ -106,6 +106,28 @@ pub const IFRAME_SHIM_JS: &str = r#"(function(){
   function resolveAbs(u){
     try { return new URL(u, document.baseURI).href; } catch(e) { return u; }
   }
+  // Patch WebSocket: resolve relative URLs against <base href> and redirect
+  // proxy-origin URLs to the real plugin origin so connections go direct.
+  var _WS = window.WebSocket;
+  var _baseOrigin = (function(){ try { return new URL(document.baseURI).origin; } catch(e){ return ''; } })();
+  window.WebSocket = function(url, protocols) {
+    try {
+      var abs = new URL(url, document.baseURI);
+      // If pointing at the proxy host, remap to the real plugin origin
+      if (abs.host === location.host && _baseOrigin && _baseOrigin !== location.origin) {
+        abs = new URL(abs.pathname + abs.search + abs.hash, _baseOrigin);
+      }
+      if (abs.protocol === 'http:') abs.protocol = 'ws:';
+      else if (abs.protocol === 'https:') abs.protocol = 'wss:';
+      url = abs.href;
+    } catch(e) {}
+    return protocols !== undefined ? new _WS(url, protocols) : new _WS(url);
+  };
+  window.WebSocket.prototype = _WS.prototype;
+  window.WebSocket.CONNECTING = _WS.CONNECTING;
+  window.WebSocket.OPEN = _WS.OPEN;
+  window.WebSocket.CLOSING = _WS.CLOSING;
+  window.WebSocket.CLOSED = _WS.CLOSED;
   function openExternal(u){
     var abs = resolveAbs(u);
     if (!/^https?:/i.test(abs)) return false;
