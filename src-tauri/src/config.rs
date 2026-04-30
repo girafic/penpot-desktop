@@ -7,6 +7,21 @@ use tokio::sync::RwLock;
 
 // ── Config ───────────────────────────────────────────────────
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AppMode {
+    /// Forward /api/* to a remote Penpot backend (current default).
+    Online,
+    /// Serve /api/* from the embedded Rust backend (no network needed).
+    Offline,
+}
+
+impl Default for AppMode {
+    fn default() -> Self {
+        AppMode::Online
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppConfig {
     pub backend_url: String,
@@ -26,6 +41,9 @@ pub struct AppConfig {
     /// own tabs.
     #[serde(default)]
     pub open_groups: Vec<Vec<String>>,
+    /// Online (proxy to backend_url) vs offline (embedded Rust backend).
+    #[serde(default)]
+    pub mode: AppMode,
 }
 
 fn default_renderer() -> String {
@@ -606,6 +624,7 @@ impl Default for AppConfig {
             language: default_language(),
             open_tabs: vec![],
             open_groups: vec![],
+            mode: AppMode::default(),
         }
     }
 }

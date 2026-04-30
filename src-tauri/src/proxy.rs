@@ -9,8 +9,9 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 use warp::Filter;
 
+use crate::backend::{flags as backend_flags, rpc as backend_rpc, store as backend_store};
 use crate::config::{
-    desktop_to_penpot_locale, save_config, SharedConfig,
+    desktop_to_penpot_locale, save_config, AppMode, SharedConfig,
     DESKTOP_CONFIG_JS, IFRAME_SHIM_JS,
 };
 #[cfg(target_os = "macos")]
@@ -109,6 +110,14 @@ fn read_penpot_version(penpot_dir: &PathBuf) -> String {
 }
 
 pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
+    start_proxy_with(config, penpot_dir, backend_store::Store::seeded()).await
+}
+
+pub async fn start_proxy_with(
+    config: SharedConfig,
+    penpot_dir: PathBuf,
+    backend_store: backend_store::Store,
+) {
     let port = config.read().await.proxy_port;
     let penpot_version = read_penpot_version(&penpot_dir);
     println!("📦 Penpot frontend version: {penpot_version}");
@@ -616,6 +625,49 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
             },
         );
 
+    // ── Offline backend: /api/rpc/command/<name> and /api/rpc/query/<name>
+    // Dispatched in-process. Returns plain JSON; the frontend consumes that
+    // because we set `enable-transit-readable-response` in penpotFlags.
+    let backend_store_for_rpc = backend_store.clone();
+    let config_for_rpc = config.clone();
+    let rpc_command = warp::path!("api" / "rpc" / "command" / String)
+        .and(warp::post())
+        .and(warp::body::bytes())
+        .and_then(move |name: String, body: bytes::Bytes| {
+            let store = backend_store_for_rpc.clone();
+            let cfg = config_for_rpc.clone();
+            async move { handle_rpc(store, cfg, backend_rpc::RpcKind::Command, name, body).await }
+        });
+
+    let backend_store_for_q = backend_store.clone();
+    let config_for_q = config.clone();
+    let rpc_query = warp::path!("api" / "rpc" / "query" / String)
+        .and(warp::post())
+        .and(warp::body::bytes())
+        .and_then(move |name: String, body: bytes::Bytes| {
+            let store = backend_store_for_q.clone();
+            let cfg = config_for_q.clone();
+            async move { handle_rpc(store, cfg, backend_rpc::RpcKind::Query, name, body).await }
+        });
+
+    // ── Offline backend: WebSocket noop endpoint.
+    // The frontend opens `/ws/notifications` on boot; without a 101 Upgrade it
+    // retries in a tight loop. We accept the upgrade and drop every frame.
+    let config_for_ws_noop = config.clone();
+    let ws_noop = warp::path!("ws" / ..)
+        .and(warp::ws())
+        .and_then(move |ws: warp::ws::Ws| {
+            let cfg = config_for_ws_noop.clone();
+            async move {
+                let offline = matches!(cfg.read().await.mode, AppMode::Offline);
+                if offline {
+                    Ok::<_, warp::Rejection>(ws.on_upgrade(noop_ws_handler))
+                } else {
+                    Err(warp::reject::not_found())
+                }
+            }
+        });
+
     // ── Proxy /api/* → backend
     let api_proxy = warp::path("api")
         .and(warp::path::tail())
@@ -741,12 +793,31 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         });
 
     // ── Serve runtime config JS files
-    let config_js = warp::path!("js" / "config.js").and(warp::get()).map(|| {
-        warp::http::Response::builder()
-            .header("Content-Type", "application/javascript")
-            .body("// Penpot Desktop: no server-side config needed\n")
-            .unwrap()
-    });
+    // In offline mode this overrides Penpot's built-in config.js with our
+    // own penpotFlags + penpotPublicURI so the frontend boots against our
+    // embedded backend. In online mode it stays an empty no-op.
+    let config_for_runtime_cfg = config.clone();
+    let config_js = warp::path!("js" / "config.js")
+        .and(warp::get())
+        .and_then(move || {
+            let cfg = config_for_runtime_cfg.clone();
+            async move {
+                let snapshot = cfg.read().await.clone();
+                let body = if matches!(snapshot.mode, AppMode::Offline) {
+                    let origin = format!("http://127.0.0.1:{}", snapshot.proxy_port);
+                    backend_flags::config_js(&origin, snapshot.renderer == "wasm")
+                } else {
+                    "// Penpot Desktop: no server-side config needed\n".to_string()
+                };
+                Ok::<_, warp::Rejection>(
+                    warp::http::Response::builder()
+                        .header("Content-Type", "application/javascript")
+                        .header("Cache-Control", "no-cache")
+                        .body(body)
+                        .unwrap(),
+                )
+            }
+        });
 
     let config_for_config_js = config.clone();
     let desktop_config_js = warp::path!("__penpot_desktop_config.js")
@@ -954,6 +1025,8 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         );
 
     // ── Combine all routes (order matters!) ──────────────────
+    // Offline backend RPC/WS routes come before the forwarding routes so they
+    // intercept `/api/rpc/...` and `/ws/...` when running in offline mode.
     let routes = get_config
         .or(set_backend)
         .or(set_view)
@@ -972,6 +1045,9 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         .or(settings_app_icon)
         .or(config_js)
         .or(desktop_config_js)
+        .or(rpc_command)
+        .or(rpc_query)
+        .or(ws_noop)
         .or(api_proxy)
         .or(assets_proxy)
         .or(internal_proxy)
@@ -983,6 +1059,79 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
     println!("   Settings: http://{addr}/__penpot_desktop");
 
     warp::serve(routes).run(addr).await;
+}
+
+// ── Offline backend handlers ─────────────────────────────────
+
+/// Dispatch an `/api/rpc/*` request to the embedded backend if offline mode
+/// is active. In online mode it falls through with `not_found` so the proxy
+/// chain forwards to the configured backend.
+async fn handle_rpc(
+    store: backend_store::Store,
+    config: SharedConfig,
+    kind: backend_rpc::RpcKind,
+    name: String,
+    body: bytes::Bytes,
+) -> Result<warp::http::Response<bytes::Bytes>, warp::Rejection> {
+    let snapshot = config.read().await.clone();
+    if !matches!(snapshot.mode, AppMode::Offline) {
+        return Err(warp::reject::not_found());
+    }
+    let parsed: serde_json::Value = if body.is_empty() {
+        serde_json::Value::Null
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(warp::http::Response::builder()
+                    .status(400)
+                    .header("content-type", "application/json")
+                    .body(bytes::Bytes::from(format!(
+                        "{{\"error\":\"invalid JSON: {e}\"}}"
+                    )))
+                    .unwrap());
+            }
+        }
+    };
+    let backend = backend_rpc::Backend::new(store, snapshot.language.clone());
+    let resp = backend.dispatch(kind, &name, &parsed);
+    let (status, body_bytes) = match resp {
+        backend_rpc::RpcResponse::Json(v) => (
+            200u16,
+            bytes::Bytes::from(serde_json::to_vec(&v).unwrap_or_default()),
+        ),
+        backend_rpc::RpcResponse::Error { status, message } => (
+            status,
+            bytes::Bytes::from(
+                serde_json::to_vec(&serde_json::json!({
+                    "type": "validation",
+                    "code": "rpc-error",
+                    "hint": message,
+                }))
+                .unwrap(),
+            ),
+        ),
+    };
+    Ok(warp::http::Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .header("cache-control", "no-store")
+        .body(body_bytes)
+        .unwrap())
+}
+
+/// Accept a WebSocket upgrade and quietly drop everything. Penpot's
+/// notification client opens this connection on every workspace boot; in
+/// offline mode there are no real-time events to deliver, so we just keep
+/// the channel open until the client closes.
+async fn noop_ws_handler(ws: warp::ws::WebSocket) {
+    use futures::StreamExt;
+    let (_tx, mut rx) = ws.split();
+    while let Some(msg) = rx.next().await {
+        if msg.is_err() {
+            break;
+        }
+    }
 }
 
 // ── HTTP Proxy Logic ─────────────────────────────────────────

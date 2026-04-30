@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod backend;
 mod config;
 mod i18n;
 mod proxy;
@@ -12,7 +13,9 @@ use config::{load_config, save_config, SharedConfig};
 use tauri::Manager;
 use tokio::sync::RwLock;
 
-use proxy::start_proxy;
+use proxy::start_proxy_with;
+
+use backend::store::Store as BackendStore;
 
 mod state;
 #[cfg(target_os = "macos")]
@@ -35,7 +38,10 @@ use menu::{build_menu, update_selection_items};
 use menu::{register_help_menu, register_window_menu};
 
 mod commands;
-use commands::{get_proxy_url, save_download};
+use commands::{
+    delete_offline_file, export_penpot_file, get_proxy_url, import_penpot_file, list_offline_files,
+    open_penpot_file, save_download, save_penpot_file, switch_mode,
+};
 
 fn normalize_shortcut_for_platform(shortcut: &str, is_macos: bool) -> String {
     if is_macos {
@@ -58,6 +64,11 @@ fn platform_shortcut(shortcut: &str) -> String {
 pub fn run() {
     let config = load_config();
     let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
+
+    // Shared in-memory backend store for offline mode. Lives for the entire
+    // process and is handed to both the proxy (for /api/rpc/*) and the Tauri
+    // command handlers (for file open/save).
+    let backend_store = BackendStore::seeded();
 
     let proxy_config = shared_config.clone();
     let port = config.proxy_port;
@@ -106,6 +117,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(shared_config.clone())
+        .manage(backend_store.clone())
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::Destroyed => {
@@ -586,10 +598,13 @@ pub fn run() {
                 let _ = window.eval(&js);
             });
 
-            // Start reverse proxy in background
+            // Start reverse proxy in background. Hand it the shared backend
+            // store so the offline RPC handler talks to the same data the
+            // Tauri commands open/save against.
             let penpot_dir_clone = penpot_dir.clone();
+            let backend_store_for_proxy = backend_store.clone();
             tauri::async_runtime::spawn(async move {
-                start_proxy(proxy_config, penpot_dir_clone).await;
+                start_proxy_with(proxy_config, penpot_dir_clone, backend_store_for_proxy).await;
             });
 
             // Create main window with download handler
@@ -786,7 +801,17 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_proxy_url, save_download])
+        .invoke_handler(tauri::generate_handler![
+            get_proxy_url,
+            save_download,
+            open_penpot_file,
+            save_penpot_file,
+            import_penpot_file,
+            export_penpot_file,
+            list_offline_files,
+            delete_offline_file,
+            switch_mode,
+        ])
         .build(tauri::generate_context!())
         .expect("Failed to build Penpot Desktop")
         .run(move |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app, event| {
