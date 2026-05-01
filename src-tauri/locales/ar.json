@@ -164,5 +164,23 @@
     "dev": "تطوير",
     "restart-prompt": "إعادة تشغيل التطبيق لتطبيق اللغة الجديدة بالكامل؟",
     "restart-later": "لاحقًا"
+  },
+  "update": {
+    "title": "تحديثات التطبيق",
+    "check": "التحقق من التحديثات…",
+    "checking": "جارٍ التحقق من التحديثات…",
+    "up-to-date": "أنت تستخدم أحدث إصدار.",
+    "available": "تحديث متاح:",
+    "available-desc": "يتوفر إصدار أحدث من Penpot Desktop على GitHub.",
+    "current": "الإصدار الحالي",
+    "latest": "أحدث إصدار",
+    "download": "فتح صفحة التنزيل",
+    "later": "لاحقًا",
+    "auto-check": "التحقق من التحديثات عند البدء",
+    "auto-check-desc": "مرة واحدة يوميًا، يسأل Penpot Desktop GitHub عن إصدار أحدث.",
+    "error": "تعذر التحقق من التحديثات",
+    "never-checked": "لم يتم التحقق",
+    "last-checked": "آخر فحص",
+    "released": "تم الإصدار"
   }
 }

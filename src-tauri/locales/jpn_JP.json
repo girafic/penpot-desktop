@@ -164,5 +164,23 @@
     "dev": "開発",
     "restart-prompt": "新しい言語を完全に適用するためにアプリを再起動しますか？",
     "restart-later": "後で"
+  },
+  "update": {
+    "title": "アプリのアップデート",
+    "check": "アップデートを確認…",
+    "checking": "アップデートを確認中…",
+    "up-to-date": "最新バージョンを使用しています。",
+    "available": "アップデートが利用可能：",
+    "available-desc": "GitHub に Penpot Desktop の新しいバージョンがあります。",
+    "current": "現在のバージョン",
+    "latest": "最新バージョン",
+    "download": "ダウンロードページを開く",
+    "later": "後で",
+    "auto-check": "起動時にアップデートを確認",
+    "auto-check-desc": "Penpot Desktop は1日1回、GitHub に新しいバージョンを問い合わせます。",
+    "error": "アップデートを確認できませんでした",
+    "never-checked": "未確認",
+    "last-checked": "最終確認",
+    "released": "リリース日"
   }
 }

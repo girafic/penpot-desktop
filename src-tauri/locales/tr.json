@@ -164,5 +164,23 @@
     "dev": "Geliştirme",
     "restart-prompt": "Yeni dili tam olarak uygulamak için uygulamayı yeniden başlatılsın mı?",
     "restart-later": "Daha sonra"
+  },
+  "update": {
+    "title": "Uygulama Güncellemeleri",
+    "check": "Güncellemeleri kontrol et…",
+    "checking": "Güncellemeler kontrol ediliyor…",
+    "up-to-date": "En güncel sürümü kullanıyorsunuz.",
+    "available": "Güncelleme mevcut:",
+    "available-desc": "Penpot Desktop'ın yeni bir sürümü GitHub'da mevcut.",
+    "current": "Mevcut sürüm",
+    "latest": "En son sürüm",
+    "download": "İndirme sayfasını aç",
+    "later": "Daha sonra",
+    "auto-check": "Başlangıçta güncelleme kontrolü",
+    "auto-check-desc": "Penpot Desktop günde bir kez GitHub'dan yeni sürüm olup olmadığını sorar.",
+    "error": "Güncellemeler kontrol edilemedi",
+    "never-checked": "Hiç kontrol edilmedi",
+    "last-checked": "Son kontrol",
+    "released": "Yayınlandı"
   }
 }

@@ -164,5 +164,23 @@
     "dev": "开发",
     "restart-prompt": "重新启动应用以完全应用新语言？",
     "restart-later": "稍后"
+  },
+  "update": {
+    "title": "应用更新",
+    "check": "检查更新…",
+    "checking": "正在检查更新…",
+    "up-to-date": "您使用的是最新版本。",
+    "available": "有可用更新：",
+    "available-desc": "GitHub 上有 Penpot Desktop 的新版本。",
+    "current": "当前版本",
+    "latest": "最新版本",
+    "download": "打开下载页面",
+    "later": "稍后",
+    "auto-check": "启动时检查更新",
+    "auto-check-desc": "Penpot Desktop 每天一次向 GitHub 查询新版本。",
+    "error": "无法检查更新",
+    "never-checked": "从未检查",
+    "last-checked": "上次检查",
+    "released": "发布于"
   }
 }

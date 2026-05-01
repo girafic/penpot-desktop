@@ -164,5 +164,23 @@
     "dev": "Dezvoltare",
     "restart-prompt": "Reporniți aplicația pentru a aplica complet noua limbă?",
     "restart-later": "Mai târziu"
+  },
+  "update": {
+    "title": "Actualizări aplicație",
+    "check": "Verifică actualizări…",
+    "checking": "Se verifică actualizările…",
+    "up-to-date": "Folosești cea mai nouă versiune.",
+    "available": "Actualizare disponibilă:",
+    "available-desc": "O versiune mai nouă a Penpot Desktop este disponibilă pe GitHub.",
+    "current": "Versiune curentă",
+    "latest": "Cea mai nouă versiune",
+    "download": "Deschide pagina de descărcare",
+    "later": "Mai târziu",
+    "auto-check": "Verifică actualizări la pornire",
+    "auto-check-desc": "O dată pe zi, Penpot Desktop întreabă GitHub dacă există o versiune mai nouă.",
+    "error": "Nu s-au putut verifica actualizările",
+    "never-checked": "Niciodată verificat",
+    "last-checked": "Ultima verificare",
+    "released": "Lansat"
   }
 }
