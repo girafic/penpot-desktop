@@ -43,6 +43,7 @@ pub fn open(path: &Path) -> Result<Connection> {
 
 /// Open an in-memory database — used by the test suite to keep parity
 /// checks fast without polluting the developer's workspace.
+#[cfg(test)]
 pub fn open_in_memory() -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     apply_pragmas(&conn)?;

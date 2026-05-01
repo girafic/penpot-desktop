@@ -50,6 +50,10 @@ pub enum Value {
     Tagged { tag: Rc<str>, rep: Box<Value> },
 }
 
+// Helper accessors are part of the public API even though the current
+// callers don't exercise all of them — they're required for the Phase
+// 5 transit-on-the-wire path and for tests.
+#[allow(dead_code)]
 impl Value {
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -198,6 +202,7 @@ impl Reader {
         Ok(self.decode(&parsed))
     }
 
+    #[allow(dead_code)]
     pub fn read_value(&mut self, v: &JsonValue) -> Value {
         self.cache.clear();
         self.decode(v)

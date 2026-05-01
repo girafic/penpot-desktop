@@ -12,7 +12,7 @@
 //! never branch on storage type.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Context, Result};
@@ -25,8 +25,7 @@ use super::changes::apply_changes;
 use super::db;
 use super::media::{self, StoreMediaRequest, StoredMedia};
 use super::model::{
-    self, File, FontVariant, Project, Snapshot, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID,
-    LOCAL_TEAM_ID,
+    File, FontVariant, Project, Snapshot, Team, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
 };
 
 /// Auto-snapshot every Nth revn — matches Penpot's
@@ -41,7 +40,12 @@ const AUTO_SNAPSHOT_KEEP: usize = 10;
 /// file is deleted.
 const MEMORY_HISTORY_CAP: usize = 200;
 
+/// One persisted entry in `file_changes`. Several fields aren't read
+/// by today's RPC layer but are kept on the public struct so future
+/// activity-feed / blame views can inspect provenance without a
+/// schema change.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ChangeRecord {
     pub revn: i64,
     pub session_id: Uuid,
@@ -94,6 +98,7 @@ impl Store {
     }
 
     /// Backwards-compatible alias used by Phase 1 tests.
+    #[allow(dead_code)]
     pub fn seeded() -> Self {
         Self::in_memory()
     }
@@ -302,7 +307,7 @@ impl Store {
                 state.files.remove(&id)
             }
             Backend::Sqlite(conn) => {
-                let mut conn = conn.lock().unwrap();
+                let conn = conn.lock().unwrap();
                 let now = Utc::now().timestamp_millis();
                 // Soft delete — same semantics as the in-memory backend
                 // (the row vanishes from list/get) but keeps related
@@ -439,6 +444,7 @@ impl Store {
         }
     }
 
+    #[allow(dead_code)]
     pub fn record_changes(&self, file_id: Uuid, record: ChangeRecord) {
         // Retained for compatibility with non-update flows (rare). The
         // primary update path goes through `apply_update`.
@@ -473,6 +479,7 @@ impl Store {
         }
     }
 
+    #[allow(dead_code)]
     pub fn change_log(&self, file_id: Uuid) -> Vec<ChangeRecord> {
         match &*self.backend {
             Backend::Memory(s) => s
@@ -1276,6 +1283,7 @@ fn row_to_snapshot(row: &Row<'_>) -> rusqlite::Result<Snapshot> {
     })
 }
 
+#[allow(dead_code)]
 fn row_to_change_record(row: &Row<'_>) -> rusqlite::Result<ChangeRecord> {
     let changes_blob: Vec<u8> = row.get(2)?;
     let undo_blob: Vec<u8> = row.get(3).unwrap_or_default();

@@ -1,4 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
+// The warp `or()` filter chain in proxy.rs nests deeply (offline RPC +
+// upload + asset routes + the existing forwarders). Release-mode
+// monomorphization blows past the default recursion limit; debug fits.
+#![recursion_limit = "512"]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

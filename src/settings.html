@@ -639,6 +639,7 @@
       }
 
       async function setMode(mode) {
+        const previous = currentMode;
         currentMode = mode;
         applyModeUi();
         try {
@@ -649,9 +650,20 @@
           });
         } catch (e) {
           console.error("[penpot-desktop] set-mode failed", e);
+          // Roll back on network error so the UI reflects the persisted state.
+          currentMode = previous;
+          applyModeUi();
+          return;
         }
         if (mode === "offline") {
           loadOfflineFiles();
+        } else if (previous === "offline" && mode === "online") {
+          // Switching back to online means the embedded backend is no
+          // longer routing /api/* — close any open Penpot tabs so the
+          // user doesn't see stale dashboards talking to a dead RPC.
+          try {
+            await fetch("/__penpot_desktop/restart-app", { method: "POST" });
+          } catch (e) {}
         }
       }
 

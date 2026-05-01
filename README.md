@@ -146,13 +146,43 @@ PENPOT_BRANCH=staging bun run build-frontend
 
 ## Usage
 
-On first launch, the **Settings page** opens:
+On first launch, the **Settings page** opens. Pick a mode:
+
+- **Online** (default) — point at any Penpot backend (cloud, self-hosted, dev). All API/WS traffic is forwarded through the local proxy.
+- **Offline** — embedded single-user backend, no network or Docker stack required. Files live in a local SQLite store with content-addressed media on disk; opens existing `.penpot` archives and saves edits back.
+
+### Online mode
 
 1. Enter a backend URL (e.g., `https://design.penpot.app`)
 2. Click **Connect**
 3. The Penpot frontend loads — all API calls go through the local proxy to the backend
 
 The URL is saved. On the next launch, the app connects automatically.
+
+### Offline mode
+
+1. In Settings, switch the **Mode** card to **Offline**
+2. Use the **Open .penpot File…** button (or **File → Open .penpot File…**, ⌘O) to import an archive. The file is unpacked into the local store and the workspace opens directly to its first page.
+3. Edit normally. Each change is persisted into SQLite via the embedded RPC backend. Edits survive app restart.
+4. **File → Save .penpot File As…** (⌘⇧S) writes the current file (including embedded media) back to disk as a new `.penpot` archive.
+5. **Pin Version** (`File → Pin Version`) and the version-history sidebar work offline too — snapshots are stored alongside the file.
+
+Offline data lives under your platform's data dir:
+- macOS: `~/Library/Application Support/penpot-desktop/`
+- Linux: `~/.local/share/penpot-desktop/`
+- Windows: `%APPDATA%/penpot-desktop/`
+
+Layout:
+```
+penpot-desktop/
+├── workspace.sqlite (+ -wal, -shm)   ← teams, projects, files, snapshots, fonts
+└── media/<id[0..2]>/<id>             ← uploaded images, fonts (content-addressed)
+```
+
+**Limitations of offline mode**
+- Only `binfile-v3` `.penpot` archives are supported. Older `binfile-v1` (Fressian-encoded) and pre-2023 `legacy-zip` archives are detected and rejected with a clear error.
+- File-data migrations across older Penpot versions are not yet implemented — newly-imported files must already be on the current schema.
+- Shared libraries across files, comments, real-time presence, and dashboard templates are stubbed out (they're inherently multi-user features).
 
 ### Keyboard shortcuts
 

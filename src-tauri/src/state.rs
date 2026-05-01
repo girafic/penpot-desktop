@@ -88,6 +88,10 @@ pub fn get_closed_tabs() -> Vec<ClosedTab> {
 // build the dynamic Plugins submenu.
 #[derive(Clone, Debug)]
 pub struct PluginInfo {
+    /// Penpot's plugin id — kept on the struct for parity with the
+    /// frontend's plugin-poller payload. Not yet consumed by the
+    /// menu code (which only needs `name`).
+    #[allow(dead_code)]
     pub id: String,
     pub name: String,
 }

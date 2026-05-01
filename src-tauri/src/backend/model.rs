@@ -13,6 +13,9 @@ use uuid::Uuid;
 use super::transit;
 
 /// Root frame UUID — present in every page's `objects` map.
+/// Hard-coded by Penpot; we surface it as a named constant so callers
+/// don't sprinkle `Uuid::nil()` literals in the change-applier.
+#[allow(dead_code)]
 pub const ROOT_FRAME_ID: Uuid = Uuid::nil();
 
 /// File-data version we author. Older files are migrated forward at import
@@ -256,6 +259,7 @@ pub fn local_profile_json(language: &str) -> Value {
 /// converted to camelCase. Penpot writes transit with kebab-case keywords
 /// (`:project-id`); the JS frontend's reader turns them into camelCase
 /// (`projectId`). We mirror that here.
+#[allow(dead_code)]
 pub fn transit_to_camel_json(transit_json: &str) -> Result<Value, transit::ReadError> {
     let mut r = transit::Reader::new();
     let v = r.read(transit_json)?;

@@ -19,6 +19,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Lightweight descriptor returned from probe-only queries.
+/// Currently unused by the proxy code path (which calls
+/// [`get_metadata`] for the full row); kept around because the
+/// Phase-3 media plumbing wants a quick "size + dimensions" answer
+/// without a DB hit, and the upcoming export-validation path will
+/// use it.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct MediaMetadata {
     pub id: Uuid,
@@ -30,7 +37,12 @@ pub struct MediaMetadata {
 #[derive(Debug, Clone)]
 pub struct StoredMedia {
     pub id: Uuid,
+    /// Content hash — kept in the API surface for the upcoming
+    /// dedup pass. Not read by today's callers.
+    #[allow(dead_code)]
     pub sha256: String,
+    /// Byte length — same situation as `sha256`.
+    #[allow(dead_code)]
     pub size: u64,
     pub mime_type: String,
     pub width: Option<u32>,

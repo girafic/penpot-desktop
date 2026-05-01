@@ -109,8 +109,13 @@ fn read_penpot_version(penpot_dir: &PathBuf) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Legacy entrypoint kept for backwards compatibility with embedders
+/// that don't supply their own backend store. New callers should use
+/// [`start_proxy_with`] directly so the same store can be shared with
+/// Tauri command handlers.
+#[allow(dead_code)]
 pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
-    start_proxy_with(config, penpot_dir, backend_store::Store::seeded()).await
+    start_proxy_with(config, penpot_dir, backend_store::Store::in_memory()).await
 }
 
 pub async fn start_proxy_with(
@@ -1370,7 +1375,6 @@ async fn handle_upload_media(
 
 async fn collect_multipart_part(mut part: warp::multipart::Part) -> Vec<u8> {
     use bytes::Buf;
-    use futures::StreamExt;
     let mut out = Vec::new();
     while let Some(chunk) = part.data().await {
         if let Ok(buf) = chunk {
@@ -1876,5 +1880,330 @@ async fn ws_proxy_handler(
     tokio::select! {
         _ = c2b => {},
         _ = b2c => {},
+    }
+}
+
+// ────────────────────────── Smoke tests ──────────────────────────
+//
+// End-to-end coverage that boots the warp listener on a random port,
+// hits each major route over real HTTP, and verifies the response.
+// Skips Tauri-specific paths (menu rebuilds, dialog UI) — those cover
+// is delegated to manual smoke tests in dev mode.
+
+#[cfg(test)]
+mod smoketest {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::sync::RwLock;
+
+    use super::*;
+    use crate::backend::store::Store;
+    use crate::config::{AppConfig, AppMode};
+
+    /// Boot a proxy in offline mode on a random free port. Returns
+    /// `(base_url, store)` once the listener has accepted its first
+    /// connection so callers can issue requests without races.
+    async fn boot_offline_proxy() -> (String, Store) {
+        let port = pick_free_port().await;
+        let config = AppConfig {
+            backend_url: String::new(),
+            recent_urls: vec![],
+            proxy_port: port,
+            renderer: "classic".into(),
+            language: "en".into(),
+            open_tabs: vec![],
+            open_groups: vec![],
+            mode: AppMode::Offline,
+        };
+        let shared: SharedConfig = Arc::new(RwLock::new(config));
+        let store = Store::in_memory();
+        let penpot_dir = std::env::temp_dir()
+            .join(format!("penpot-desktop-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&penpot_dir).unwrap();
+        std::fs::write(penpot_dir.join("index.html"), "<!doctype html>").unwrap();
+
+        let store_for_proxy = store.clone();
+        tokio::spawn(async move {
+            super::start_proxy_with(shared, penpot_dir, store_for_proxy).await;
+        });
+
+        let base = format!("http://127.0.0.1:{port}");
+        wait_for_listener(&base).await;
+        (base, store)
+    }
+
+    async fn pick_free_port() -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
+
+    async fn wait_for_listener(base: &str) {
+        for _ in 0..100 {
+            if reqwest::get(format!("{base}/__penpot_desktop/config"))
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("proxy did not come up on {base}");
+    }
+
+    fn client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_reflects_offline_mode() {
+        let (base, _store) = boot_offline_proxy().await;
+        let resp: serde_json::Value = client()
+            .get(format!("{base}/__penpot_desktop/config"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(resp.get("mode").and_then(|v| v.as_str()), Some("offline"));
+    }
+
+    #[tokio::test]
+    async fn config_js_injects_offline_flags() {
+        let (base, _store) = boot_offline_proxy().await;
+        let body = client()
+            .get(format!("{base}/js/config.js"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(body.contains("disable-registration"), "missing disable-registration: {body}");
+        assert!(body.contains("enable-transit-readable-response"), "missing flag: {body}");
+        assert!(body.contains("penpotPublicURI"));
+    }
+
+    #[tokio::test]
+    async fn rpc_get_profile_returns_local_user() {
+        let (base, _store) = boot_offline_proxy().await;
+        let resp: serde_json::Value = client()
+            .post(format!("{base}/api/rpc/command/get-profile"))
+            .body("{}")
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.get("email").and_then(|v| v.as_str()),
+            Some("local@penpot-desktop.local")
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_create_get_update_file_round_trip() {
+        let (base, _store) = boot_offline_proxy().await;
+        let c = client();
+        let id = uuid::Uuid::new_v4().to_string();
+
+        // create-file
+        let create: serde_json::Value = c
+            .post(format!("{base}/api/rpc/command/create-file"))
+            .json(&serde_json::json!({"id": id, "name": "Smoke"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(create.get("name").and_then(|v| v.as_str()), Some("Smoke"));
+        let page_id = create
+            .get("data")
+            .and_then(|d| d.get("pagesIndex"))
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.keys().next().cloned())
+            .expect("page id");
+
+        // update-file with one add-obj
+        let new_obj_id = uuid::Uuid::new_v4().to_string();
+        let upd: serde_json::Value = c
+            .post(format!("{base}/api/rpc/command/update-file"))
+            .json(&serde_json::json!({
+                "id": id,
+                "revn": 0,
+                "sessionId": uuid::Uuid::new_v4().to_string(),
+                "changes": [{
+                    "type": "add-obj",
+                    "id": new_obj_id,
+                    "pageId": page_id,
+                    "parentId": uuid::Uuid::nil().to_string(),
+                    "frameId": uuid::Uuid::nil().to_string(),
+                    "obj": {"id": new_obj_id, "type": "rect"}
+                }]
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(upd.get("revn").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(upd.get("lagged").and_then(|v| v.as_bool()), Some(false));
+
+        // get-file again — object should be present
+        let after: serde_json::Value = c
+            .post(format!("{base}/api/rpc/command/get-file"))
+            .json(&serde_json::json!({"id": id}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(after.get("revn").and_then(|v| v.as_i64()), Some(1));
+        let objects = after
+            .pointer(&format!("/data/pagesIndex/{page_id}/objects"))
+            .and_then(|v| v.as_object())
+            .expect("objects");
+        assert!(objects.contains_key(&new_obj_id));
+    }
+
+    #[tokio::test]
+    async fn rpc_unknown_command_returns_null_with_200() {
+        let (base, _store) = boot_offline_proxy().await;
+        let resp = client()
+            .post(format!("{base}/api/rpc/command/unknown-command-xyz"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(body.is_null(), "expected null, got {body:?}");
+    }
+
+    #[tokio::test]
+    async fn upload_media_round_trips_through_assets_endpoint() {
+        let (base, store) = boot_offline_proxy().await;
+        let file_id = uuid::Uuid::new_v4();
+
+        let body_bytes = b"PNGFAKE".to_vec();
+        let form = reqwest::multipart::Form::new()
+            .text("file-id", file_id.to_string())
+            .text("name", "logo")
+            .part(
+                "content",
+                reqwest::multipart::Part::bytes(body_bytes.clone())
+                    .file_name("logo.png")
+                    .mime_str("image/png")
+                    .unwrap(),
+            );
+
+        let resp: serde_json::Value = client()
+            .post(format!("{base}/api/rpc/command/upload-file-media-object"))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let storage_id = resp.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        // The /assets/by-id/<id> route should now serve those bytes.
+        let bytes = client()
+            .get(format!("{base}/assets/by-id/{storage_id}"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(bytes.as_ref(), body_bytes.as_slice());
+
+        // And the store has the row.
+        let storage_uuid = uuid::Uuid::parse_str(&storage_id).unwrap();
+        assert!(store.media_metadata(storage_uuid).is_some());
+    }
+
+    #[tokio::test]
+    async fn websocket_route_is_wired_in_offline_mode() {
+        let (base, _store) = boot_offline_proxy().await;
+        // A plain GET without upgrade headers won't actually upgrade,
+        // but if the noop route is wired warp returns 400 (missing
+        // upgrade) — anything other than 404 means the route exists.
+        let resp = client()
+            .get(format!("{base}/ws/notifications"))
+            .send()
+            .await
+            .unwrap();
+        assert_ne!(
+            resp.status().as_u16(),
+            404,
+            "ws route is missing — noop handler not wired"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_lifecycle_via_rpc() {
+        let (base, _store) = boot_offline_proxy().await;
+        let c = client();
+        let id = uuid::Uuid::new_v4().to_string();
+        c.post(format!("{base}/api/rpc/command/create-file"))
+            .json(&serde_json::json!({"id": id, "name": "S"}))
+            .send()
+            .await
+            .unwrap();
+        let snap: serde_json::Value = c
+            .post(format!("{base}/api/rpc/command/take-file-snapshot"))
+            .json(&serde_json::json!({"fileId": id, "label": "v1"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(snap.get("label").and_then(|v| v.as_str()), Some("v1"));
+        let listed: Vec<serde_json::Value> = c
+            .post(format!("{base}/api/rpc/command/get-file-snapshots"))
+            .json(&serde_json::json!({"fileId": id}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn set_mode_endpoint_persists_change() {
+        let (base, _store) = boot_offline_proxy().await;
+        let c = client();
+        // Flip to online — config endpoint should reflect.
+        c.post(format!("{base}/__penpot_desktop/set-mode"))
+            .json(&serde_json::json!({"mode": "online"}))
+            .send()
+            .await
+            .unwrap();
+        let cfg: serde_json::Value = c
+            .get(format!("{base}/__penpot_desktop/config"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(cfg.get("mode").and_then(|v| v.as_str()), Some("online"));
     }
 }
