@@ -1060,11 +1060,21 @@ fn offline_open_dialog(
     };
     let mut first_id: Option<uuid::Uuid> = None;
     for imported in imp.files {
+        let media_blobs = imported.media.clone();
         let file = backend::binfile::imported_to_file(imported, project_id);
         if first_id.is_none() {
             first_id = Some(file.id);
         }
         store.put_file(file);
+        // Persist embedded media so file.data.media[*].id resolves at
+        // request time without requiring re-upload.
+        for (id_str, media_bytes) in media_blobs {
+            let Ok(storage_id) = uuid::Uuid::parse_str(&id_str) else { continue };
+            let mime = guess_media_mime(&media_bytes);
+            if let Err(e) = store.store_media(&media_bytes, &mime, Some(storage_id)) {
+                eprintln!("[offline-open] store_media({storage_id}) failed: {e}");
+            }
+        }
     }
     let Some(file_id) = first_id else { return };
     // Navigate the focused window directly into the workspace for the
@@ -1157,7 +1167,8 @@ fn offline_save_as_dialog(
         Ok(p) => p,
         Err(_) => return,
     };
-    let bytes = match backend::binfile::export_to_bytes(&file, |_| None) {
+    let provider = store.media_provider();
+    let bytes = match backend::binfile::export_to_bytes(&file, &provider) {
         Ok(b) => b,
         Err(e) => {
             app.dialog()
@@ -1194,6 +1205,28 @@ fn show_import_error(app: &tauri::AppHandle, lang: &str, detail: &str) {
         .title(i18n::t(lang, "file.offline-import-failed-title"))
         .kind(MessageDialogKind::Warning)
         .blocking_show();
+}
+
+/// Sniff the MIME type from a media blob's first few bytes. Mirrors the
+/// helper in `commands.rs`; kept duplicated rather than re-exported so
+/// the dialog/import paths don't grow a circular dependency.
+fn guess_media_mime(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return "image/png".into();
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "image/jpeg".into();
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return "image/gif".into();
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return "image/webp".into();
+    }
+    if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
+        return "image/svg+xml".into();
+    }
+    "application/octet-stream".into()
 }
 
 /// Strip path separators and characters most filesystems reject. Keeps

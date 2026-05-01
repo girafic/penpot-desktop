@@ -411,6 +411,47 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_preserves_media() {
+        // Embed a fake storage object in file.data.media + an entry on
+        // disk via the provider closure. Export → re-import should
+        // return the bytes verbatim.
+        let mut f = File::empty(Uuid::new_v4(), Uuid::new_v4(), "Has Media");
+        let storage_id = Uuid::new_v4();
+        let asset_id = Uuid::new_v4().to_string();
+        if let Some(map) = f.data.as_object_mut() {
+            map.insert(
+                "media".into(),
+                serde_json::json!({
+                    asset_id.clone(): {
+                        "id": storage_id.to_string(),
+                        "name": "logo.png",
+                        "mtype": "image/png",
+                        "width": 1,
+                        "height": 1
+                    }
+                }),
+            );
+        }
+        let media_bytes = b"PNGdata".to_vec();
+        let storage_id_str = storage_id.to_string();
+        let media_bytes_clone = media_bytes.clone();
+        let bytes = export_to_bytes(&f, |id| {
+            if id == storage_id_str {
+                Some(media_bytes_clone.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+        let imp = import_binfile_v3(Cursor::new(bytes)).unwrap();
+        let imported = &imp.files[0];
+        assert_eq!(imported.media.len(), 1);
+        let key = imported.media.keys().next().unwrap();
+        assert_eq!(key, &storage_id.to_string());
+        assert_eq!(imported.media.values().next().unwrap(), &media_bytes);
+    }
+
+    #[test]
     fn round_trip_preserves_pages() {
         let mut f = File::empty(Uuid::new_v4(), Uuid::new_v4(), "Multi-Page");
         // Add a second page directly to the data tree.

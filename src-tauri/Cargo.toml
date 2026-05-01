@@ -44,6 +44,7 @@ thiserror = "1"
 rusqlite = { version = "0.32", features = ["bundled", "blob", "uuid", "chrono"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 zstd = { version = "0.13", default-features = false }
+imagesize = "0.13"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

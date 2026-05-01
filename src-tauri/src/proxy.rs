@@ -712,6 +712,23 @@ pub async fn start_proxy_with(
             },
         );
 
+    // ── Offline backend: /api/rpc/command/upload-file-media-object
+    // Multipart upload — must be matched BEFORE the generic JSON RPC
+    // route below, because that route consumes the body as bytes and
+    // tries to parse it as JSON.
+    let backend_store_for_upload = backend_store.clone();
+    let config_for_upload = config.clone();
+    let upload_media = warp::path!(
+        "api" / "rpc" / "command" / "upload-file-media-object"
+    )
+    .and(warp::post())
+    .and(warp::multipart::form().max_length(64 * 1024 * 1024))
+    .and_then(move |form: warp::multipart::FormData| {
+        let store = backend_store_for_upload.clone();
+        let cfg = config_for_upload.clone();
+        async move { handle_upload_media(store, cfg, form).await }
+    });
+
     // ── Offline backend: /api/rpc/command/<name> and /api/rpc/query/<name>
     // Dispatched in-process. Returns plain JSON; the frontend consumes that
     // because we set `enable-transit-readable-response` in penpotFlags.
@@ -735,6 +752,29 @@ pub async fn start_proxy_with(
             let store = backend_store_for_q.clone();
             let cfg = config_for_q.clone();
             async move { handle_rpc(store, cfg, backend_rpc::RpcKind::Query, name, body).await }
+        });
+
+    // ── Offline backend: /assets/by-id/<uuid> serves uploaded media.
+    // Penpot's frontend rewrites image references to {public_uri}/assets/by-id/<uuid>
+    // for both the SVG renderer and the WASM canvas renderer.
+    let backend_store_for_assets = backend_store.clone();
+    let config_for_assets_offline = config.clone();
+    let assets_by_id = warp::path!("assets" / "by-id" / String)
+        .and(warp::get())
+        .and_then(move |id_str: String| {
+            let store = backend_store_for_assets.clone();
+            let cfg = config_for_assets_offline.clone();
+            async move { handle_asset_by_id(store, cfg, id_str).await }
+        });
+
+    let backend_store_for_assets2 = backend_store.clone();
+    let config_for_assets_offline2 = config.clone();
+    let assets_by_file_media = warp::path!("assets" / "by-file-media-id" / String)
+        .and(warp::get())
+        .and_then(move |id_str: String| {
+            let store = backend_store_for_assets2.clone();
+            let cfg = config_for_assets_offline2.clone();
+            async move { handle_asset_by_id(store, cfg, id_str).await }
         });
 
     // ── Offline backend: WebSocket noop endpoint.
@@ -1134,8 +1174,11 @@ pub async fn start_proxy_with(
         .or(settings_app_icon)
         .or(config_js)
         .or(desktop_config_js)
+        .or(upload_media)
         .or(rpc_command)
         .or(rpc_query)
+        .or(assets_by_id)
+        .or(assets_by_file_media)
         .or(ws_noop)
         .or(api_proxy)
         .or(assets_proxy)
@@ -1221,6 +1264,145 @@ async fn noop_ws_handler(ws: warp::ws::WebSocket) {
             break;
         }
     }
+}
+
+/// Multipart-upload handler for `/api/rpc/command/upload-file-media-object`.
+/// Falls through to the online forwarder when offline mode is disabled.
+///
+/// Penpot's frontend posts:
+///   - `file-id`     — UUID of the file we're attaching the asset to
+///   - `name`        — display name (used as fallback alt text)
+///   - `is-local`    — "true"/"false" (we ignore; everything is local now)
+///   - `content`     — the actual file bytes, with `content-type`
+///
+/// Response is plain JSON with the storage-object descriptor.
+async fn handle_upload_media(
+    store: backend_store::Store,
+    config: SharedConfig,
+    mut form: warp::multipart::FormData,
+) -> Result<warp::http::Response<bytes::Bytes>, warp::Rejection> {
+    use futures::TryStreamExt;
+
+    let snapshot = config.read().await.clone();
+    if !matches!(snapshot.mode, AppMode::Offline) {
+        return Err(warp::reject::not_found());
+    }
+
+    let mut file_id: Option<uuid::Uuid> = None;
+    let mut name: Option<String> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    let mut mime_type: Option<String> = None;
+
+    while let Some(part) = form.try_next().await.map_err(|_| warp::reject::reject())? {
+        let part_name = part.name().to_string();
+        let part_mime = part.content_type().map(str::to_string);
+        let buf = collect_multipart_part(part).await;
+        match part_name.as_str() {
+            "file-id" => {
+                file_id = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| uuid::Uuid::parse_str(s.trim()).ok());
+            }
+            "name" => {
+                name = String::from_utf8(buf).ok();
+            }
+            "content" => {
+                mime_type = part_mime;
+                bytes = Some(buf);
+            }
+            _ => {}
+        }
+    }
+
+    let Some(bytes) = bytes else {
+        return Ok(json_response(
+            400,
+            &serde_json::json!({"hint": "missing :content part"}),
+        ));
+    };
+    let mime_type = mime_type.unwrap_or_else(|| "application/octet-stream".into());
+    let name = name.unwrap_or_else(|| "asset".into());
+
+    let stored = match store.store_media(&bytes, &mime_type, None) {
+        Ok(s) => s,
+        Err(e) => {
+            return Ok(json_response(
+                500,
+                &serde_json::json!({"hint": format!("store_media failed: {e}")}),
+            ));
+        }
+    };
+    let asset_id = uuid::Uuid::new_v4();
+    if let Some(file_id) = file_id {
+        if let Err(e) = store.link_file_media(file_id, stored.id, asset_id, &name) {
+            eprintln!("[upload-media] link_file_media failed: {e}");
+        }
+    }
+    let payload = serde_json::json!({
+        "id": stored.id,
+        "fileId": file_id,
+        "name": name,
+        "width": stored.width.unwrap_or(0),
+        "height": stored.height.unwrap_or(0),
+        "mtype": stored.mime_type,
+        "isLocal": true,
+    });
+    Ok(json_response(200, &payload))
+}
+
+async fn collect_multipart_part(mut part: warp::multipart::Part) -> Vec<u8> {
+    use bytes::Buf;
+    use futures::StreamExt;
+    let mut out = Vec::new();
+    while let Some(chunk) = part.data().await {
+        if let Ok(buf) = chunk {
+            out.extend_from_slice(buf.chunk());
+        }
+    }
+    out
+}
+
+/// Serve a stored media blob by storage-object id.
+async fn handle_asset_by_id(
+    store: backend_store::Store,
+    config: SharedConfig,
+    id_str: String,
+) -> Result<warp::http::Response<bytes::Bytes>, warp::Rejection> {
+    let snapshot = config.read().await.clone();
+    if !matches!(snapshot.mode, AppMode::Offline) {
+        return Err(warp::reject::not_found());
+    }
+    let id = match uuid::Uuid::parse_str(&id_str) {
+        Ok(u) => u,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+    let bytes = match store.read_media(id) {
+        Some(b) => b,
+        None => return Err(warp::reject::not_found()),
+    };
+    let metadata = store.media_metadata(id);
+    let mime = metadata
+        .as_ref()
+        .map(|m| m.mime_type.clone())
+        .unwrap_or_else(|| "application/octet-stream".into());
+    Ok(warp::http::Response::builder()
+        .status(200)
+        .header("content-type", mime)
+        .header("cache-control", "public, max-age=31536000, immutable")
+        .header("Cross-Origin-Resource-Policy", "same-origin")
+        .body(bytes::Bytes::from(bytes))
+        .unwrap())
+}
+
+fn json_response(status: u16, value: &serde_json::Value) -> warp::http::Response<bytes::Bytes> {
+    warp::http::Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .header("cache-control", "no-store")
+        .body(bytes::Bytes::from(
+            serde_json::to_vec(value).unwrap_or_default(),
+        ))
+        .unwrap()
 }
 
 // ── HTTP Proxy Logic ─────────────────────────────────────────

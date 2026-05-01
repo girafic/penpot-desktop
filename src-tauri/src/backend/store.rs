@@ -12,6 +12,7 @@
 //! never branch on storage type.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{Context, Result};
@@ -22,6 +23,7 @@ use uuid::Uuid;
 
 use super::changes::apply_changes;
 use super::db;
+use super::media::{self, StoreMediaRequest, StoredMedia};
 use super::model::{
     self, File, Project, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
 };
@@ -70,6 +72,9 @@ pub enum UpdateOutcome {
 #[derive(Clone)]
 pub struct Store {
     backend: Arc<Backend>,
+    /// Directory where media bytes live for the SQLite backend. Memory
+    /// backend ignores this and keeps blobs in RAM.
+    media_root: Option<PathBuf>,
 }
 
 enum Backend {
@@ -83,6 +88,7 @@ impl Store {
         let state = MemoryState::seeded();
         Self {
             backend: Arc::new(Backend::Memory(RwLock::new(state))),
+            media_root: None,
         }
     }
 
@@ -91,24 +97,34 @@ impl Store {
         Self::in_memory()
     }
 
-    /// Open or create a SQLite-backed store at `path`. Creates the parent
-    /// directory if needed and runs schema migrations on first open.
-    /// Seeds the local team / Drafts project if the DB is empty.
+    /// Open or create a SQLite-backed store at `path`. Media files are
+    /// written next to the database under `<path-parent>/media/`.
     pub fn open_sqlite(path: &std::path::Path) -> Result<Self> {
         let conn = db::open(path).context("opening sqlite store")?;
-        Self::from_connection(conn)
+        let media_root = path
+            .parent()
+            .map(|p| p.join("media"))
+            .unwrap_or_else(|| PathBuf::from("media"));
+        std::fs::create_dir_all(&media_root)
+            .with_context(|| format!("creating media root {}", media_root.display()))?;
+        Self::from_connection(conn, Some(media_root))
     }
 
     /// In-memory SQLite (test-only). Same migrations, no on-disk file.
+    /// Media is written to a fresh temp directory.
     #[cfg(test)]
     pub fn in_memory_sqlite() -> Result<Self> {
         let conn = db::open_in_memory()?;
-        Self::from_connection(conn)
+        let dir = std::env::temp_dir()
+            .join(format!("penpot-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir)?;
+        Self::from_connection(conn, Some(dir))
     }
 
-    fn from_connection(conn: Connection) -> Result<Self> {
+    fn from_connection(conn: Connection, media_root: Option<PathBuf>) -> Result<Self> {
         let store = Self {
             backend: Arc::new(Backend::Sqlite(Mutex::new(conn))),
+            media_root,
         };
         store.seed_defaults_if_empty()?;
         Ok(store)
@@ -490,6 +506,121 @@ impl Store {
             *s.write().unwrap() = MemoryState::seeded();
         }
     }
+
+    // ──────────────── Media ────────────────
+
+    /// Persist a binary asset. `explicit_id` lets the caller fix the
+    /// storage-object id (used by `.penpot` import to keep ids stable
+    /// across export/import cycles); pass `None` for a fresh upload.
+    pub fn store_media(
+        &self,
+        bytes: &[u8],
+        mime_type: &str,
+        explicit_id: Option<Uuid>,
+    ) -> Result<StoredMedia> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let id = explicit_id.unwrap_or_else(Uuid::new_v4);
+                let (width, height) = media::probe_dimensions(bytes);
+                state
+                    .write()
+                    .unwrap()
+                    .media
+                    .insert(id, (mime_type.to_string(), bytes.to_vec()));
+                Ok(StoredMedia {
+                    id,
+                    sha256: media::sha256_hex(bytes),
+                    size: bytes.len() as u64,
+                    mime_type: mime_type.to_string(),
+                    width,
+                    height,
+                })
+            }
+            Backend::Sqlite(conn) => {
+                let root = self
+                    .media_root
+                    .as_ref()
+                    .context("sqlite store has no media root")?;
+                let mut conn = conn.lock().unwrap();
+                media::store_media(
+                    &mut conn,
+                    root,
+                    StoreMediaRequest {
+                        bytes,
+                        mime_type,
+                        explicit_id,
+                    },
+                )
+            }
+        }
+    }
+
+    /// Read media bytes by storage-object id.
+    pub fn read_media(&self, id: Uuid) -> Option<Vec<u8>> {
+        match &*self.backend {
+            Backend::Memory(state) => state
+                .read()
+                .unwrap()
+                .media
+                .get(&id)
+                .map(|(_, bytes)| bytes.clone()),
+            Backend::Sqlite(_) => {
+                let root = self.media_root.as_ref()?;
+                media::read_bytes(root, id).ok()
+            }
+        }
+    }
+
+    /// Look up media metadata without reading bytes.
+    pub fn media_metadata(&self, id: Uuid) -> Option<StoredMedia> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let st = state.read().unwrap();
+                let (mime, bytes) = st.media.get(&id)?;
+                let (w, h) = media::probe_dimensions(bytes);
+                Some(StoredMedia {
+                    id,
+                    sha256: media::sha256_hex(bytes),
+                    size: bytes.len() as u64,
+                    mime_type: mime.clone(),
+                    width: w,
+                    height: h,
+                })
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                media::get_metadata(&conn, id).ok().flatten()
+            }
+        }
+    }
+
+    /// Record a per-file media reference (file.data.media[asset_id] →
+    /// storage object). Idempotent on `(file_id, asset_id)`.
+    pub fn link_file_media(
+        &self,
+        file_id: Uuid,
+        media_id: Uuid,
+        asset_id: Uuid,
+        name: &str,
+    ) -> Result<()> {
+        match &*self.backend {
+            Backend::Memory(_) => Ok(()),
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                media::insert_file_media_ref(&conn, file_id, media_id, asset_id, name)
+            }
+        }
+    }
+
+    /// Best-effort resolver for `media_provider` callbacks in
+    /// `binfile::export_to_bytes` — returns the on-disk bytes for a
+    /// storage-object id, or None if missing.
+    pub fn media_provider(&self) -> impl Fn(&str) -> Option<Vec<u8>> + '_ {
+        move |id_str: &str| {
+            let id = Uuid::parse_str(id_str).ok()?;
+            self.read_media(id)
+        }
+    }
 }
 
 impl Default for Store {
@@ -506,6 +637,10 @@ struct MemoryState {
     projects: HashMap<Uuid, Project>,
     files: HashMap<Uuid, File>,
     change_log: HashMap<Uuid, Vec<ChangeRecord>>,
+    /// In-memory media: id → (mime_type, bytes). Width/height aren't
+    /// stored separately since the in-memory backend re-probes on read
+    /// when needed (rare; tests only).
+    media: HashMap<Uuid, (String, Vec<u8>)>,
 }
 
 impl MemoryState {
@@ -1033,5 +1168,38 @@ mod tests {
             .and_then(Value::as_object)
             .and_then(|m| m.keys().next().cloned())
             .unwrap()
+    }
+
+    #[test]
+    fn sqlite_store_and_read_media() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let stored = s
+            .store_media(b"hello-image", "image/png", None)
+            .expect("store");
+        let bytes = s.read_media(stored.id).expect("read");
+        assert_eq!(bytes, b"hello-image");
+        let meta = s.media_metadata(stored.id).expect("metadata");
+        assert_eq!(meta.size, 11);
+    }
+
+    #[test]
+    fn memory_store_and_read_media() {
+        let s = Store::in_memory();
+        let stored = s
+            .store_media(b"in-memory-bytes", "image/jpeg", None)
+            .expect("store");
+        let bytes = s.read_media(stored.id).expect("read");
+        assert_eq!(bytes, b"in-memory-bytes");
+    }
+
+    #[test]
+    fn media_provider_serves_stored_bytes() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let id = Uuid::new_v4();
+        s.store_media(b"X", "image/png", Some(id)).unwrap();
+        let provider = s.media_provider();
+        assert_eq!(provider(&id.to_string()).as_deref(), Some(b"X".as_ref()));
+        assert!(provider("not-a-uuid").is_none());
+        assert!(provider(&Uuid::new_v4().to_string()).is_none());
     }
 }

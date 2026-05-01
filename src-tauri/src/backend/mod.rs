@@ -20,6 +20,7 @@ pub mod binfile;
 pub mod changes;
 pub mod db;
 pub mod flags;
+pub mod media;
 pub mod model;
 pub mod rpc;
 pub mod store;
