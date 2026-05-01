@@ -26,6 +26,17 @@ pub struct AppConfig {
     /// own tabs.
     #[serde(default)]
     pub open_groups: Vec<Vec<String>>,
+    /// Check GitHub for new releases automatically on startup.
+    #[serde(default = "default_updates_auto_check")]
+    pub updates_auto_check: bool,
+    /// Unix epoch (seconds) of the last successful update check.
+    /// Used to throttle startup checks to once every 24 h.
+    #[serde(default)]
+    pub updates_last_check: i64,
+    /// Latest release version we already announced via a startup dialog,
+    /// so the user isn't pestered repeatedly about the same version.
+    #[serde(default)]
+    pub updates_last_announced: String,
 }
 
 fn default_renderer() -> String {
@@ -33,6 +44,9 @@ fn default_renderer() -> String {
 }
 fn default_language() -> String {
     "en".into()
+}
+fn default_updates_auto_check() -> bool {
+    true
 }
 
 /// Map desktop locale codes to Apple locale codes for `AppleLanguages`.
@@ -606,6 +620,9 @@ impl Default for AppConfig {
             language: default_language(),
             open_tabs: vec![],
             open_groups: vec![],
+            updates_auto_check: default_updates_auto_check(),
+            updates_last_check: 0,
+            updates_last_announced: String::new(),
         }
     }
 }

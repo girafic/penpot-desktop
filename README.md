@@ -67,6 +67,14 @@ Native desktop app that runs the **real Penpot frontend locally**. The backend i
 - **Window menu** (macOS) — lists open tabs/windows, recently closed tabs, Minimize, and macOS Sequoia tiling options (Fill, Center, Move & Resize)
 - **Help menu** — links to User Guide, Tutorials, Courses, Plugins, Libraries, Community, GitHub, Feedback, Website, and Release Notes (open in default browser)
 
+### App Updates
+
+- **Built-in update checker** — checks `github.com/girafic/penpot-desktop` releases for newer versions
+- **Auto-check on startup** — runs at most once per 24 h, configurable in Settings → App Updates (default: on)
+- **Manual check** — Help menu → _Check for Updates…_ shows status in a native dialog
+- **Settings panel** — current vs. latest version, last-check info, and a one-click "Open Download Page" button that takes you to the GitHub release in your default browser
+- **No silent installs** — the matching `.dmg` / `.deb` / `.AppImage` / `.msi` / `.exe` is downloaded by the user, so signing-key infrastructure is not required and OSS forks can ship their own updates by changing the repository constant in `src-tauri/src/updater.rs`
+
 ### Internationalization
 
 - **18 languages** — English, Deutsch, Español, Français, Português (BR), Italiano, Türkçe, Русский, 中文, 日本語, 한국어, العربية, Català, Nederlands, Polski, Română, Українська, עברית

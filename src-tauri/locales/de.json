@@ -164,5 +164,23 @@
     "dev": "Entwicklung",
     "restart-prompt": "App neu starten, um die neue Sprache vollständig zu übernehmen?",
     "restart-later": "Später"
+  },
+  "update": {
+    "title": "App-Aktualisierungen",
+    "check": "Nach Updates suchen…",
+    "checking": "Suche nach Updates…",
+    "up-to-date": "Du verwendest die aktuelle Version.",
+    "available": "Update verfügbar:",
+    "available-desc": "Eine neuere Version von Penpot Desktop ist auf GitHub verfügbar.",
+    "current": "Aktuelle Version",
+    "latest": "Neueste Version",
+    "download": "Download-Seite öffnen",
+    "later": "Später",
+    "auto-check": "Beim Start nach Updates suchen",
+    "auto-check-desc": "Einmal pro Tag fragt Penpot Desktop bei GitHub nach einer neuen Version.",
+    "error": "Update-Suche fehlgeschlagen",
+    "never-checked": "Noch nie geprüft",
+    "last-checked": "Zuletzt geprüft",
+    "released": "Veröffentlicht"
   }
 }

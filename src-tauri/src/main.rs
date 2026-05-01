@@ -7,6 +7,7 @@ use std::sync::Arc;
 mod config;
 mod i18n;
 mod proxy;
+mod updater;
 
 use config::{load_config, save_config, SharedConfig};
 use tauri::Manager;
@@ -35,7 +36,7 @@ use menu::{build_menu, update_selection_items};
 use menu::{register_help_menu, register_window_menu};
 
 mod commands;
-use commands::{get_proxy_url, save_download};
+use commands::{check_for_updates, get_proxy_url, open_update_page, save_download};
 
 fn normalize_shortcut_for_platform(shortcut: &str, is_macos: bool) -> String {
     if is_macos {
@@ -310,6 +311,13 @@ pub fn run() {
                                 let _ = create_tab_window(app, port_for_menu, Some(&tab.url), focused.as_deref());
                             }
                         }
+                        return;
+                    }
+                    "help-check-updates" => {
+                        let app_clone = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            run_update_check_with_dialog(app_clone, true).await;
+                        });
                         return;
                     }
                     "help-guide" | "help-tutorials" | "help-courses" |
@@ -592,6 +600,9 @@ pub fn run() {
                 start_proxy(proxy_config, penpot_dir_clone).await;
             });
 
+            // Auto-check for app updates (debounced, opt-out via settings)
+            schedule_startup_update_check(app.handle().clone(), shared_config.clone());
+
             // Create main window with download handler
             use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
 
@@ -786,7 +797,12 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_proxy_url, save_download])
+        .invoke_handler(tauri::generate_handler![
+            get_proxy_url,
+            save_download,
+            check_for_updates,
+            open_update_page,
+        ])
         .build(tauri::generate_context!())
         .expect("Failed to build Penpot Desktop")
         .run(move |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app, event| {
@@ -827,6 +843,138 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Check GitHub for a newer release. When `interactive` is true the result
+/// is always shown via a native dialog (used by Help → Check for Updates…).
+/// When false (startup auto-check), the dialog is only shown if a new
+/// version is available and we haven't already announced it before.
+async fn run_update_check_with_dialog(app: tauri::AppHandle, interactive: bool) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    use tauri_plugin_opener::OpenerExt;
+
+    let current = app.package_info().version.to_string();
+    let lang = app
+        .try_state::<config::SharedConfig>()
+        .and_then(|c| c.try_read().ok().map(|c| c.language.clone()))
+        .unwrap_or_else(|| "en".to_string());
+
+    let result = updater::check(&current).await;
+    if let Some(state) = app.try_state::<config::SharedConfig>() {
+        updater::record_check(state.inner()).await;
+    }
+
+    match result {
+        Ok(info) if info.available => {
+            // Skip startup announcement when we've already prompted for this version.
+            if !interactive {
+                let already = app
+                    .try_state::<config::SharedConfig>()
+                    .and_then(|c| c.try_read().ok().map(|c| c.updates_last_announced.clone()))
+                    .unwrap_or_default();
+                if already == info.latest_version {
+                    return;
+                }
+            }
+
+            let title = format!(
+                "{} {}",
+                i18n::t(&lang, "update.available"),
+                info.latest_version
+            );
+            let body = format!(
+                "{}\n\n{}: {}\n{}: {}\n\n{}",
+                i18n::t(&lang, "update.available-desc"),
+                i18n::t(&lang, "update.current"),
+                info.current_version,
+                i18n::t(&lang, "update.latest"),
+                info.latest_version,
+                updater::shorten_notes(&info.release_notes, 600),
+            );
+            let download = i18n::t(&lang, "update.download");
+            let later = i18n::t(&lang, "update.later");
+            let url = info.release_url.clone();
+            let app_for_dialog = app.clone();
+            let app_for_open = app.clone();
+            let version = info.latest_version.clone();
+            let _ = app.run_on_main_thread(move || {
+                let confirmed = app_for_dialog
+                    .dialog()
+                    .message(&body)
+                    .title(&title)
+                    .buttons(MessageDialogButtons::OkCancelCustom(download, later))
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+                    .blocking_show();
+                if confirmed {
+                    let _ = app_for_open.opener().open_url(&url, None::<&str>);
+                }
+            });
+
+            // Remember the version so non-interactive checks don't reprompt
+            // the user about the same release on every launch.
+            if let Some(state) = app.try_state::<config::SharedConfig>() {
+                updater::record_announced(state.inner(), &version).await;
+            }
+        }
+        Ok(info) if interactive => {
+            let body = format!(
+                "{}\n\n{}: {}",
+                i18n::t(&lang, "update.up-to-date"),
+                i18n::t(&lang, "update.current"),
+                info.current_version
+            );
+            let app_for_dialog = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                app_for_dialog
+                    .dialog()
+                    .message(body)
+                    .title(i18n::t(&lang, "update.title"))
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+                    .blocking_show();
+            });
+        }
+        Err(e) if interactive => {
+            let app_for_dialog = app.clone();
+            let body = format!("{}: {}", i18n::t(&lang, "update.error"), e);
+            let _ = app.run_on_main_thread(move || {
+                app_for_dialog
+                    .dialog()
+                    .message(body)
+                    .title(i18n::t(&lang, "update.title"))
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+                    .blocking_show();
+            });
+        }
+        _ => {}
+    }
+}
+
+/// One-shot startup hook: run an update check after a delay if the user
+/// has the auto-check setting enabled and we haven't checked in the last
+/// 24 hours.
+fn schedule_startup_update_check(app: tauri::AppHandle, config: SharedConfig) {
+    tauri::async_runtime::spawn(async move {
+        // Wait for window/proxy startup churn to settle and avoid hammering
+        // GitHub on rapid restart loops.
+        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+
+        let (auto, last_check) = {
+            let c = config.read().await;
+            (c.updates_auto_check, c.updates_last_check)
+        };
+        if !auto {
+            return;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        const DAY: i64 = 24 * 60 * 60;
+        if last_check > 0 && now - last_check < DAY {
+            return;
+        }
+        run_update_check_with_dialog(app, false).await;
+    });
 }
 
 /// Save current tab groups to config so the session can be restored after

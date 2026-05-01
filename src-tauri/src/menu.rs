@@ -931,6 +931,8 @@ pub fn build_menu(
         .separator()
         .item(&mi!(app, "help-website", t("help.website")))
         .item(&mi!(app, "help-release-notes", t("help.release-notes")))
+        .separator()
+        .item(&mi!(app, "help-check-updates", t("update.check")))
         .build()?;
     menu_builder = menu_builder.item(&window_submenu).item(&help_submenu);
     let menu = menu_builder.build()?;

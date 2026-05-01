@@ -62,8 +62,9 @@ All Rust source lives in `src-tauri/src/`:
 | `menu.rs` | ~940 | Context-aware native menu builder, 39 selection-dependent items, dynamic labels, keyboard shortcut forwarding |
 | `windows.rs` | ~400 | Tab/window creation, plugin launcher, JS patch injection |
 | `state.rs` | ~270 | Global state (`lazy_static` HashMaps/Vecs) — tab URLs/titles, closed tabs, plugins, window modes |
-| `commands.rs` | ~17 | Tauri IPC commands (`save_download`, `get_proxy_url`) |
+| `commands.rs` | ~40 | Tauri IPC commands (`save_download`, `get_proxy_url`, `check_for_updates`, `open_update_page`) |
 | `i18n.rs` | ~85 | Translation function `t(lang, key)`, lazy-loaded JSON, 18 languages |
+| `updater.rs` | ~210 | GitHub Releases-based update checker, version compare, in-memory cache |
 
 ### Other important files
 

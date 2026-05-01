@@ -23,6 +23,7 @@ use crate::state::{
     focused_window_mode, get_window_mode, set_window_mode, track_tab_title, track_tab_url,
     update_plugins, PluginInfo, APP_HANDLE, CURRENT_LANG,
 };
+use crate::updater;
 use crate::windows::create_tab_window;
 
 #[cfg(target_os = "macos")]
@@ -468,6 +469,33 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                     let short_key = key.replacen("settings.", "s.", 1);
                     map.insert(short_key, serde_json::Value::String(i18n::t(&lang, key)));
                 }
+
+                // Update-related strings reuse the original `update.*` key on
+                // the page (not "s." prefixed) so the same keys can be used
+                // anywhere in the app.
+                for key in [
+                    "update.title",
+                    "update.check",
+                    "update.checking",
+                    "update.up-to-date",
+                    "update.available",
+                    "update.available-desc",
+                    "update.current",
+                    "update.latest",
+                    "update.download",
+                    "update.later",
+                    "update.auto-check",
+                    "update.auto-check-desc",
+                    "update.error",
+                    "update.never-checked",
+                    "update.last-checked",
+                    "update.released",
+                ] {
+                    map.insert(
+                        key.to_string(),
+                        serde_json::Value::String(i18n::t(&lang, key)),
+                    );
+                }
                 Ok::<_, warp::Rejection>(warp::reply::json(&map))
             }
         });
@@ -518,6 +546,81 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
                 }
                 Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
             }
+        });
+
+    // ── GET /__penpot_desktop/check-updates → run an updater check (or
+    // return the cached result via ?cached=1) and report status to the
+    // settings page.
+    let config_for_updates = config.clone();
+    let check_updates = warp::path!("__penpot_desktop" / "check-updates")
+        .and(warp::get())
+        .and(warp::query::<HashMap<String, String>>())
+        .and_then(move |query: HashMap<String, String>| {
+            let cfg = config_for_updates.clone();
+            async move {
+                let cached_only = query
+                    .get("cached")
+                    .map(|v| v == "1" || v == "true")
+                    .unwrap_or(false);
+
+                if cached_only {
+                    if let Some(info) = updater::cached().await {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(&info));
+                    }
+                }
+
+                let current = APP_HANDLE
+                    .get()
+                    .map(|app| app.package_info().version.to_string())
+                    .unwrap_or_default();
+                match updater::check(&current).await {
+                    Ok(info) => {
+                        updater::record_check(&cfg).await;
+                        Ok(warp::reply::json(&info))
+                    }
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"error": e, "current_version": current}),
+                    )),
+                }
+            }
+        });
+
+    // ── POST /__penpot_desktop/set-auto-update → toggle the auto-check
+    // preference from the settings page.
+    let config_for_auto = config.clone();
+    let set_auto_update = warp::path!("__penpot_desktop" / "set-auto-update")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| {
+            let cfg = config_for_auto.clone();
+            async move {
+                let enabled = body
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                let mut c = cfg.write().await;
+                c.updates_auto_check = enabled;
+                save_config(&c);
+                Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"ok": true, "enabled": enabled}),
+                ))
+            }
+        });
+
+    // ── POST /__penpot_desktop/open-update → open the release page in
+    // the system browser (no in-app installer — the user downloads the
+    // matching .dmg/.deb/.AppImage/.msi/.exe themselves).
+    let open_update = warp::path!("__penpot_desktop" / "open-update")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| async move {
+            if let Some(url) = body.get("url").and_then(|v| v.as_str()) {
+                if let Some(app) = APP_HANDLE.get() {
+                    use tauri_plugin_opener::OpenerExt;
+                    let _ = app.opener().open_url(url, None::<&str>);
+                }
+            }
+            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
         });
 
     // ── POST /__penpot_desktop/update-plugins → receive installed plugin list from JS poller
@@ -965,6 +1068,9 @@ pub async fn start_proxy(config: SharedConfig, penpot_dir: PathBuf) {
         .or(get_translations)
         .or(set_title)
         .or(open_tab)
+        .or(check_updates)
+        .or(set_auto_update)
+        .or(open_update)
         .or(update_plugins_ep)
         .or(update_tab_url)
         .or(cors_proxy)

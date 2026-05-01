@@ -372,6 +372,48 @@
         border-radius: 4px;
         vertical-align: middle;
       }
+
+      .btn-secondary {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .update-status {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--text-dim);
+        margin-bottom: 12px;
+      }
+      .update-status strong {
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+      }
+      .update-message {
+        margin-top: 4px;
+        font-size: 12px;
+        min-height: 18px;
+      }
+      .update-message.ok {
+        color: var(--accent);
+      }
+      .update-message.warn {
+        color: #f59e0b;
+      }
+      .update-message.error {
+        color: var(--danger);
+      }
+      .update-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
     </style>
   </head>
   <body>
@@ -493,6 +535,36 @@
         </div>
       </div>
 
+      <div class="card" id="updateCard">
+        <label data-i18n="update.title">App Updates</label>
+        <div id="updateStatus" class="update-status">
+          <div class="update-line">
+            <span data-i18n="update.current">Current version</span>:
+            <strong id="updateCurrentVersion">{{PENPOT_VERSION}}</strong>
+          </div>
+          <div class="update-line" id="updateLatestLine" style="display: none">
+            <span data-i18n="update.latest">Latest version</span>:
+            <strong id="updateLatestVersion"></strong>
+          </div>
+          <div class="update-line update-message" id="updateMessage"></div>
+        </div>
+        <div class="update-actions">
+          <button class="btn btn-secondary" id="updateCheckBtn" onclick="checkForUpdate()" data-i18n="update.check">
+            Check for Updates…
+          </button>
+          <button class="btn btn-primary" id="updateDownloadBtn" onclick="openUpdateDownload()" style="display: none" data-i18n="update.download">
+            Open Download Page
+          </button>
+        </div>
+        <label class="toggle-option" id="updateAutoOpt" onclick="toggleAutoUpdate()" style="margin-top: 14px; cursor: pointer;">
+          <span class="toggle-radio" id="updateAutoRadio"></span>
+          <div>
+            <strong data-i18n="update.auto-check">Check for updates on startup</strong>
+            <span class="toggle-desc" data-i18n="update.auto-check-desc">Once per day, Penpot Desktop will ask GitHub if a newer release is available.</span>
+          </div>
+        </label>
+      </div>
+
       <div class="footer">
         Penpot Desktop v1.0 ·
         <a href="https://penpot.app" target="_blank">Penpot</a> {{PENPOT_VERSION}} +
@@ -580,6 +652,99 @@
           .classList.toggle("active", r !== "wasm");
       }
 
+      let autoUpdate = true;
+      let latestUpdateInfo = null;
+
+      function setAutoRadio(enabled) {
+        autoUpdate = enabled;
+        document
+          .getElementById("updateAutoOpt")
+          .classList.toggle("active", enabled);
+      }
+
+      function toggleAutoUpdate() {
+        const next = !autoUpdate;
+        setAutoRadio(next);
+        fetch("/__penpot_desktop/set-auto-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next }),
+        }).catch(function () {});
+      }
+
+      function setUpdateMessage(text, kind) {
+        const el = document.getElementById("updateMessage");
+        el.textContent = text || "";
+        el.className = "update-line update-message" + (kind ? " " + kind : "");
+      }
+
+      function applyUpdateInfo(info) {
+        latestUpdateInfo = info;
+        const dlBtn = document.getElementById("updateDownloadBtn");
+        const latestLine = document.getElementById("updateLatestLine");
+        if (!info || info.error || !info.latest_version) {
+          latestLine.style.display = "none";
+          dlBtn.style.display = "none";
+          if (info && info.error) {
+            setUpdateMessage(
+              (_translations["update.error"] || "Could not check for updates") +
+                ": " +
+                info.error,
+              "error",
+            );
+          }
+          return;
+        }
+        document.getElementById("updateLatestVersion").textContent =
+          info.latest_version;
+        latestLine.style.display = "block";
+        if (info.available) {
+          setUpdateMessage(
+            _translations["update.available"] || "Update available:",
+            "warn",
+          );
+          dlBtn.style.display = "inline-flex";
+        } else {
+          setUpdateMessage(
+            _translations["update.up-to-date"] ||
+              "You're on the latest version.",
+            "ok",
+          );
+          dlBtn.style.display = "none";
+        }
+      }
+
+      async function checkForUpdate() {
+        const btn = document.getElementById("updateCheckBtn");
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = _translations["update.checking"] || "Checking…";
+        try {
+          const resp = await fetch("/__penpot_desktop/check-updates");
+          const info = await resp.json();
+          applyUpdateInfo(info);
+        } catch (e) {
+          setUpdateMessage(
+            (_translations["update.error"] || "Could not check for updates") +
+              ": " +
+              e.message,
+            "error",
+          );
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      }
+
+      function openUpdateDownload() {
+        if (!latestUpdateInfo || !latestUpdateInfo.release_url) return;
+        fetch("/__penpot_desktop/open-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: latestUpdateInfo.release_url }),
+        }).catch(function () {});
+      }
+
       async function init() {
         try {
           const resp = await fetch("/__penpot_desktop/config");
@@ -589,7 +754,21 @@
           populateLanguages();
           setRenderer(config.renderer || "classic");
           renderRecent(config.recent_urls || []);
+          setAutoRadio(config.updates_auto_check !== false);
           await applyTranslations();
+          // Surface the cached update result without hitting the network on
+          // every settings open. The user can still click "Check" to refresh.
+          try {
+            const cachedResp = await fetch(
+              "/__penpot_desktop/check-updates?cached=1",
+            );
+            if (cachedResp.ok) {
+              const cached = await cachedResp.json();
+              if (cached && cached.latest_version) {
+                applyUpdateInfo(cached);
+              }
+            }
+          } catch (e) {}
         } catch (e) {
           console.error(e);
         }
