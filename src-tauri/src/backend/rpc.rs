@@ -12,15 +12,13 @@
 //! tolerates empty/missing data but throws on network errors.
 
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::changes::apply_changes;
 use super::model::{
     self, local_profile_json, FILE_DATA_VERSION, LOCAL_PROFILE_ID, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
 };
-use super::store::{ChangeRecord, Store};
+use super::store::{Store, UpdateOutcome, UpdateRequest};
 
 /// Kind of RPC the request maps to.
 #[derive(Debug, Clone, Copy)]
@@ -402,6 +400,8 @@ impl Backend {
 
     /// `update-file` — apply a vector of changes, bump revn, record the
     /// change log entry, return the new revn back to the editor.
+    /// Delegates to [`Store::apply_update`] so the SQLite backend can wrap
+    /// the whole pipeline in one transaction.
     fn update_file(&self, body: &Value) -> Result<RpcResponse> {
         let id = body
             .get("id")
@@ -418,83 +418,36 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
 
-        let outcome = self.store.with_file_mut(id, |file| -> Result<UpdateOutcome> {
-            if file.revn != client_revn {
-                return Ok(UpdateOutcome::Lagged {
-                    server_revn: file.revn,
-                });
-            }
-            let undo = apply_changes(&mut file.data, &changes)?;
-            file.revn += 1;
-            file.modified_at = Utc::now();
-            Ok(UpdateOutcome::Applied {
-                new_revn: file.revn,
-                undo,
-            })
+        let outcome = self.store.apply_update(UpdateRequest {
+            file_id: id,
+            client_revn,
+            session_id,
+            changes,
         });
 
-        let outcome = match outcome {
-            Some(Ok(o)) => o,
-            Some(Err(e)) => {
-                return Ok(RpcResponse::Error {
-                    status: 400,
-                    message: e.to_string(),
-                });
-            }
-            None => {
-                return Ok(RpcResponse::Error {
-                    status: 404,
-                    message: format!("file {id} not found"),
-                });
-            }
-        };
-
         match outcome {
-            UpdateOutcome::Applied { new_revn, undo } => {
-                self.store.record_changes(
-                    id,
-                    ChangeRecord {
-                        revn: new_revn,
-                        session_id,
-                        changes: Value::Array(changes.clone()),
-                        undo: Value::Array(undo),
-                        at: Utc::now(),
-                    },
-                );
-                Ok(RpcResponse::ok(json!({
-                    "revn": new_revn,
-                    "vern": 0,
-                    "lagged": false,
-                    "changes": []
-                })))
-            }
-            UpdateOutcome::Lagged { server_revn } => {
-                // Replay the missing changes back to the client. In single-user
-                // offline this should never happen, but we hand back the right
-                // shape so the editor can reconcile rather than crash.
-                let log = self.store.change_log(id);
-                let missed: Vec<Value> = log
-                    .into_iter()
-                    .filter(|r| r.revn > client_revn)
-                    .flat_map(|r| match r.changes {
-                        Value::Array(arr) => arr,
-                        _ => vec![],
-                    })
-                    .collect();
-                Ok(RpcResponse::ok(json!({
-                    "revn": server_revn,
-                    "vern": 0,
-                    "lagged": true,
-                    "changes": missed,
-                })))
-            }
+            UpdateOutcome::Applied { new_revn, vern } => Ok(RpcResponse::ok(json!({
+                "revn": new_revn,
+                "vern": vern,
+                "lagged": false,
+                "changes": []
+            }))),
+            UpdateOutcome::Lagged { server_revn, missed } => Ok(RpcResponse::ok(json!({
+                "revn": server_revn,
+                "vern": 0,
+                "lagged": true,
+                "changes": missed,
+            }))),
+            UpdateOutcome::NotFound => Ok(RpcResponse::Error {
+                status: 404,
+                message: format!("file {id} not found"),
+            }),
+            UpdateOutcome::Error(message) => Ok(RpcResponse::Error {
+                status: 400,
+                message,
+            }),
         }
     }
-}
-
-enum UpdateOutcome {
-    Applied { new_revn: i64, undo: Vec<Value> },
-    Lagged { server_revn: i64 },
 }
 
 /// Parse a UUID from a JSON value that may be either a plain string or a

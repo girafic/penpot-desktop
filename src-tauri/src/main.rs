@@ -65,10 +65,34 @@ pub fn run() {
     let config = load_config();
     let shared_config: SharedConfig = Arc::new(RwLock::new(config.clone()));
 
-    // Shared in-memory backend store for offline mode. Lives for the entire
-    // process and is handed to both the proxy (for /api/rpc/*) and the Tauri
-    // command handlers (for file open/save).
-    let backend_store = BackendStore::seeded();
+    // Shared backend store for offline mode. Lives for the entire process
+    // and is handed to both the proxy (for /api/rpc/*) and the Tauri
+    // command handlers (for file open/save). Persisted to
+    // `<app_data>/workspace.sqlite` so edits survive restarts; falls back
+    // to RAM-only if the DB can't be opened (sandboxed CI, broken
+    // permissions, etc.) — that path keeps the desktop usable, just
+    // ephemerally.
+    let backend_store = match dirs::data_dir()
+        .map(|d| d.join("penpot-desktop").join("workspace.sqlite"))
+    {
+        Some(db_path) => match BackendStore::open_sqlite(&db_path) {
+            Ok(store) => {
+                println!("💾 Offline store: {}", db_path.display());
+                store
+            }
+            Err(e) => {
+                eprintln!(
+                    "[backend] failed to open {}: {e} — falling back to in-memory store",
+                    db_path.display()
+                );
+                BackendStore::in_memory()
+            }
+        },
+        None => {
+            eprintln!("[backend] no data dir — falling back to in-memory store");
+            BackendStore::in_memory()
+        }
+    };
 
     let proxy_config = shared_config.clone();
     let port = config.proxy_port;
