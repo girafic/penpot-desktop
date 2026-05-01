@@ -44,6 +44,29 @@ impl Snapshot {
     }
 }
 
+// ───────────────────────── Font variant ─────────────────────────
+
+/// One entry in a team's font collection. Penpot variants ship in
+/// multiple formats (TTF, OTF, WOFF, WOFF2) so the frontend can pick
+/// whichever the user's browser supports best. Each `*_file_id` points
+/// at a media row keyed by its storage-object UUID.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct FontVariant {
+    pub id: Uuid,
+    pub team_id: Uuid,
+    pub font_id: Uuid,
+    pub font_family: String,
+    pub font_weight: i64,
+    /// `"normal"` or `"italic"`.
+    pub font_style: String,
+    pub woff1_file_id: Option<Uuid>,
+    pub woff2_file_id: Option<Uuid>,
+    pub ttf_file_id: Option<Uuid>,
+    pub otf_file_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+}
+
 // ───────────────────────── Team / Project / File ─────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

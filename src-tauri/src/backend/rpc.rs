@@ -123,7 +123,8 @@ impl Backend {
             // ── Comments / fonts / plugins / templates
             "get-comment-threads" | "get-unread-comment-threads" => RpcResponse::ok(json!([])),
             "get-comments" => RpcResponse::ok(json!([])),
-            "get-font-variants" => RpcResponse::ok(json!([])),
+            "get-font-variants" => self.get_font_variants(body),
+            "delete-font-variant" => self.delete_font_variant(body)?,
             "get-team-plugins" => RpcResponse::ok(json!([])),
             "get-builtin-templates" => RpcResponse::ok(json!([])),
 
@@ -534,6 +535,44 @@ impl Backend {
         self.store.delete_snapshot(snapshot_id).ok();
         Ok(RpcResponse::ok(json!({"id": snapshot_id})))
     }
+
+    // ──────────────── Font variants ────────────────
+
+    fn get_font_variants(&self, body: &Value) -> RpcResponse {
+        let team_id = body
+            .get("teamId")
+            .and_then(parse_uuid_field)
+            .unwrap_or(LOCAL_TEAM_ID);
+        let variants = self.store.list_font_variants(team_id);
+        RpcResponse::ok(Value::Array(
+            variants.iter().map(font_variant_payload).collect(),
+        ))
+    }
+
+    fn delete_font_variant(&self, body: &Value) -> Result<RpcResponse> {
+        let id = body
+            .get("id")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :id"))?;
+        self.store.delete_font_variant(id).ok();
+        Ok(RpcResponse::ok(json!({"id": id})))
+    }
+}
+
+fn font_variant_payload(v: &model::FontVariant) -> Value {
+    json!({
+        "id": v.id,
+        "teamId": v.team_id,
+        "fontId": v.font_id,
+        "fontFamily": v.font_family,
+        "fontWeight": v.font_weight,
+        "fontStyle": v.font_style,
+        "woff1FileId": v.woff1_file_id,
+        "woff2FileId": v.woff2_file_id,
+        "ttfFileId": v.ttf_file_id,
+        "otfFileId": v.otf_file_id,
+        "createdAt": v.created_at,
+    })
 }
 
 fn snapshot_payload(s: &model::Snapshot) -> Value {
@@ -705,6 +744,60 @@ mod tests {
             RpcResponse::Json(Value::Null) => {}
             other => panic!("expected null JSON, got {:?}", debug_resp(&other)),
         }
+    }
+
+    #[test]
+    fn font_variants_via_rpc() {
+        use crate::backend::store::CreateFontVariantRequest;
+        let b = fresh_backend();
+        // Create a variant directly via the store (mirrors what the
+        // multipart handler does after writing media rows).
+        let woff2 = b.store.store_media(b"font", "font/woff2", None).unwrap();
+        let variant = b
+            .store
+            .create_font_variant(CreateFontVariantRequest {
+                id: None,
+                team_id: LOCAL_TEAM_ID,
+                font_id: Uuid::new_v4(),
+                font_family: "Custom",
+                font_weight: 400,
+                font_style: "normal",
+                woff1_file_id: None,
+                woff2_file_id: Some(woff2.id),
+                ttf_file_id: None,
+                otf_file_id: None,
+            })
+            .unwrap();
+        let listed = b.dispatch(
+            RpcKind::Command,
+            "get-font-variants",
+            &json!({"teamId": LOCAL_TEAM_ID.to_string()}),
+        );
+        let arr = match listed {
+            RpcResponse::Json(Value::Array(a)) => a,
+            _ => panic!("get-font-variants failed"),
+        };
+        assert_eq!(arr.len(), 1);
+        assert_eq!(
+            arr[0].get("fontFamily").and_then(Value::as_str),
+            Some("Custom")
+        );
+        // delete-font-variant clears the listing.
+        let _ = b.dispatch(
+            RpcKind::Command,
+            "delete-font-variant",
+            &json!({"id": variant.id.to_string()}),
+        );
+        let after = b.dispatch(
+            RpcKind::Command,
+            "get-font-variants",
+            &json!({"teamId": LOCAL_TEAM_ID.to_string()}),
+        );
+        let arr = match after {
+            RpcResponse::Json(Value::Array(a)) => a,
+            _ => panic!("get-font-variants failed"),
+        };
+        assert_eq!(arr.len(), 0);
     }
 
     #[test]

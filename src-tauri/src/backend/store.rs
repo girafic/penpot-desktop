@@ -25,7 +25,8 @@ use super::changes::apply_changes;
 use super::db;
 use super::media::{self, StoreMediaRequest, StoredMedia};
 use super::model::{
-    self, File, Project, Snapshot, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
+    self, File, FontVariant, Project, Snapshot, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID,
+    LOCAL_TEAM_ID,
 };
 
 /// Auto-snapshot every Nth revn — matches Penpot's
@@ -804,6 +805,128 @@ impl Store {
             }
         }
     }
+
+    // ──────────────── Font variants ────────────────
+
+    /// Persist a new font variant, recording references to the format
+    /// files that the caller has already stored via `store_media`.
+    pub fn create_font_variant(
+        &self,
+        req: CreateFontVariantRequest<'_>,
+    ) -> Result<FontVariant> {
+        let variant = FontVariant {
+            id: req.id.unwrap_or_else(Uuid::new_v4),
+            team_id: req.team_id,
+            font_id: req.font_id,
+            font_family: req.font_family.to_string(),
+            font_weight: req.font_weight,
+            font_style: req.font_style.to_string(),
+            woff1_file_id: req.woff1_file_id,
+            woff2_file_id: req.woff2_file_id,
+            ttf_file_id: req.ttf_file_id,
+            otf_file_id: req.otf_file_id,
+            created_at: Utc::now(),
+        };
+        match &*self.backend {
+            Backend::Memory(state) => {
+                state
+                    .write()
+                    .unwrap()
+                    .font_variants
+                    .entry(req.team_id)
+                    .or_default()
+                    .push(variant.clone());
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                conn.execute(
+                    "INSERT INTO font_variants \
+                     (id, team_id, font_id, font_family, font_weight, font_style, \
+                      woff1_file_id, woff2_file_id, ttf_file_id, otf_file_id, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    params![
+                        variant.id.as_bytes(),
+                        variant.team_id.as_bytes(),
+                        variant.font_id.as_bytes(),
+                        variant.font_family,
+                        variant.font_weight,
+                        variant.font_style,
+                        variant.woff1_file_id.as_ref().map(|u| u.as_bytes().to_vec()),
+                        variant.woff2_file_id.as_ref().map(|u| u.as_bytes().to_vec()),
+                        variant.ttf_file_id.as_ref().map(|u| u.as_bytes().to_vec()),
+                        variant.otf_file_id.as_ref().map(|u| u.as_bytes().to_vec()),
+                        variant.created_at.timestamp_millis(),
+                    ],
+                )?;
+            }
+        }
+        Ok(variant)
+    }
+
+    pub fn list_font_variants(&self, team_id: Uuid) -> Vec<FontVariant> {
+        match &*self.backend {
+            Backend::Memory(state) => state
+                .read()
+                .unwrap()
+                .font_variants
+                .get(&team_id)
+                .cloned()
+                .unwrap_or_default(),
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                conn.prepare(
+                    "SELECT id, team_id, font_id, font_family, font_weight, font_style, \
+                      woff1_file_id, woff2_file_id, ttf_file_id, otf_file_id, created_at \
+                     FROM font_variants \
+                     WHERE team_id = ?1 AND deleted_at IS NULL \
+                     ORDER BY font_family, font_weight, font_style",
+                )
+                .ok()
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![team_id.as_bytes()], row_to_font_variant)
+                        .ok()
+                        .map(|it| it.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Soft-delete a font variant (preserves the underlying media so
+    /// other variants sharing the same files still work).
+    pub fn delete_font_variant(&self, id: Uuid) -> Result<()> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let mut st = state.write().unwrap();
+                for list in st.font_variants.values_mut() {
+                    list.retain(|v| v.id != id);
+                }
+                Ok(())
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE font_variants SET deleted_at = ?1 WHERE id = ?2",
+                    params![Utc::now().timestamp_millis(), id.as_bytes()],
+                )?;
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateFontVariantRequest<'a> {
+    pub id: Option<Uuid>,
+    pub team_id: Uuid,
+    pub font_id: Uuid,
+    pub font_family: &'a str,
+    pub font_weight: i64,
+    pub font_style: &'a str,
+    pub woff1_file_id: Option<Uuid>,
+    pub woff2_file_id: Option<Uuid>,
+    pub ttf_file_id: Option<Uuid>,
+    pub otf_file_id: Option<Uuid>,
 }
 
 impl Default for Store {
@@ -826,6 +949,8 @@ struct MemoryState {
     media: HashMap<Uuid, (String, Vec<u8>)>,
     /// Per-file snapshots: file_id → (snapshot, encoded data).
     snapshots: HashMap<Uuid, Vec<MemorySnapshot>>,
+    /// Per-team font variants: team_id → variants.
+    font_variants: HashMap<Uuid, Vec<FontVariant>>,
 }
 
 #[derive(Clone)]
@@ -1118,6 +1243,26 @@ fn row_to_file(row: &Row<'_>) -> rusqlite::Result<File> {
         created_at: ts_to_dt(row.get::<_, i64>(10)?),
         modified_at: ts_to_dt(row.get::<_, i64>(11)?),
         data,
+    })
+}
+
+fn row_to_font_variant(row: &Row<'_>) -> rusqlite::Result<FontVariant> {
+    fn opt_uuid(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<Uuid>> {
+        let bytes: Option<Vec<u8>> = row.get(idx)?;
+        Ok(bytes.and_then(|b| Uuid::from_slice(&b).ok()))
+    }
+    Ok(FontVariant {
+        id: row_uuid(row, 0)?,
+        team_id: row_uuid(row, 1)?,
+        font_id: row_uuid(row, 2)?,
+        font_family: row.get(3)?,
+        font_weight: row.get(4)?,
+        font_style: row.get(5)?,
+        woff1_file_id: opt_uuid(row, 6)?,
+        woff2_file_id: opt_uuid(row, 7)?,
+        ttf_file_id: opt_uuid(row, 8)?,
+        otf_file_id: opt_uuid(row, 9)?,
+        created_at: ts_to_dt(row.get::<_, i64>(10)?),
     })
 }
 
@@ -1494,5 +1639,83 @@ mod tests {
         let listed = s.list_snapshots(id);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, snap.id);
+    }
+
+    // ─────── Font variants ───────
+
+    #[test]
+    fn sqlite_create_and_list_font_variants() {
+        let s = Store::in_memory_sqlite().unwrap();
+        // First persist a media row so the FK from font_variants holds.
+        let woff2 = s.store_media(b"FONTBYTES", "font/woff2", None).unwrap();
+        let font_id = Uuid::new_v4();
+        let variant = s
+            .create_font_variant(super::CreateFontVariantRequest {
+                id: None,
+                team_id: LOCAL_TEAM_ID,
+                font_id,
+                font_family: "Inter",
+                font_weight: 400,
+                font_style: "normal",
+                woff1_file_id: None,
+                woff2_file_id: Some(woff2.id),
+                ttf_file_id: None,
+                otf_file_id: None,
+            })
+            .unwrap();
+        assert_eq!(variant.font_family, "Inter");
+        let list = s.list_font_variants(LOCAL_TEAM_ID);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, variant.id);
+        assert_eq!(list[0].woff2_file_id, Some(woff2.id));
+    }
+
+    #[test]
+    fn sqlite_delete_font_variant_is_soft() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let ttf = s.store_media(b"TTF", "font/ttf", None).unwrap();
+        let variant = s
+            .create_font_variant(super::CreateFontVariantRequest {
+                id: None,
+                team_id: LOCAL_TEAM_ID,
+                font_id: Uuid::new_v4(),
+                font_family: "Roboto",
+                font_weight: 700,
+                font_style: "italic",
+                woff1_file_id: None,
+                woff2_file_id: None,
+                ttf_file_id: Some(ttf.id),
+                otf_file_id: None,
+            })
+            .unwrap();
+        assert_eq!(s.list_font_variants(LOCAL_TEAM_ID).len(), 1);
+        s.delete_font_variant(variant.id).unwrap();
+        assert_eq!(s.list_font_variants(LOCAL_TEAM_ID).len(), 0);
+        // Underlying media row stays — other variants might still
+        // reference it.
+        assert!(s.read_media(ttf.id).is_some());
+    }
+
+    #[test]
+    fn memory_font_variants_round_trip() {
+        let s = Store::in_memory();
+        let _ = s.store_media(b"X", "font/woff", None).unwrap();
+        let variant = s
+            .create_font_variant(super::CreateFontVariantRequest {
+                id: None,
+                team_id: LOCAL_TEAM_ID,
+                font_id: Uuid::new_v4(),
+                font_family: "Mono",
+                font_weight: 500,
+                font_style: "normal",
+                woff1_file_id: None,
+                woff2_file_id: None,
+                ttf_file_id: None,
+                otf_file_id: None,
+            })
+            .unwrap();
+        let list = s.list_font_variants(LOCAL_TEAM_ID);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, variant.id);
     }
 }

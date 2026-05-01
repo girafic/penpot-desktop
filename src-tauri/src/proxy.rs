@@ -729,6 +729,23 @@ pub async fn start_proxy_with(
         async move { handle_upload_media(store, cfg, form).await }
     });
 
+    // ── Offline backend: /api/rpc/command/create-font-variant
+    // Multipart with `team-id`, `font-id`, `font-family`, `font-style`,
+    // `font-weight`, plus per-format `data-woff` / `data-woff2` /
+    // `data-ttf` / `data-otf` parts.
+    let backend_store_for_font = backend_store.clone();
+    let config_for_font = config.clone();
+    let upload_font = warp::path!(
+        "api" / "rpc" / "command" / "create-font-variant"
+    )
+    .and(warp::post())
+    .and(warp::multipart::form().max_length(32 * 1024 * 1024))
+    .and_then(move |form: warp::multipart::FormData| {
+        let store = backend_store_for_font.clone();
+        let cfg = config_for_font.clone();
+        async move { handle_create_font_variant(store, cfg, form).await }
+    });
+
     // ── Offline backend: /api/rpc/command/<name> and /api/rpc/query/<name>
     // Dispatched in-process. Returns plain JSON; the frontend consumes that
     // because we set `enable-transit-readable-response` in penpotFlags.
@@ -1175,6 +1192,7 @@ pub async fn start_proxy_with(
         .or(config_js)
         .or(desktop_config_js)
         .or(upload_media)
+        .or(upload_font)
         .or(rpc_command)
         .or(rpc_query)
         .or(assets_by_id)
@@ -1360,6 +1378,159 @@ async fn collect_multipart_part(mut part: warp::multipart::Part) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Multipart-upload handler for `/api/rpc/command/create-font-variant`.
+/// Stores up to four format files (woff, woff2, ttf, otf) under
+/// fresh storage-object IDs and inserts a row tying them together as
+/// one variant in the team's font collection.
+async fn handle_create_font_variant(
+    store: backend_store::Store,
+    config: SharedConfig,
+    mut form: warp::multipart::FormData,
+) -> Result<warp::http::Response<bytes::Bytes>, warp::Rejection> {
+    use crate::backend::store::CreateFontVariantRequest;
+    use futures::TryStreamExt;
+
+    let snapshot = config.read().await.clone();
+    if !matches!(snapshot.mode, AppMode::Offline) {
+        return Err(warp::reject::not_found());
+    }
+
+    let mut team_id: Option<uuid::Uuid> = None;
+    let mut font_id: Option<uuid::Uuid> = None;
+    let mut font_family: Option<String> = None;
+    let mut font_weight: Option<i64> = None;
+    let mut font_style: Option<String> = None;
+    let mut woff1: Option<(Vec<u8>, String)> = None;
+    let mut woff2: Option<(Vec<u8>, String)> = None;
+    let mut ttf: Option<(Vec<u8>, String)> = None;
+    let mut otf: Option<(Vec<u8>, String)> = None;
+
+    while let Some(part) = form.try_next().await.map_err(|_| warp::reject::reject())? {
+        let part_name = part.name().to_string();
+        let mime = part
+            .content_type()
+            .map(str::to_string)
+            .unwrap_or_default();
+        let buf = collect_multipart_part(part).await;
+        match part_name.as_str() {
+            "team-id" => {
+                team_id = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| uuid::Uuid::parse_str(s.trim()).ok());
+            }
+            "font-id" => {
+                font_id = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| uuid::Uuid::parse_str(s.trim()).ok());
+            }
+            "font-family" => {
+                font_family = String::from_utf8(buf).ok();
+            }
+            "font-weight" => {
+                font_weight = std::str::from_utf8(&buf)
+                    .ok()
+                    .and_then(|s| s.trim().parse().ok());
+            }
+            "font-style" => {
+                font_style = String::from_utf8(buf).ok();
+            }
+            "data-woff" => woff1 = Some((buf, mime_or(mime, "font/woff"))),
+            "data-woff2" => woff2 = Some((buf, mime_or(mime, "font/woff2"))),
+            "data-ttf" => ttf = Some((buf, mime_or(mime, "font/ttf"))),
+            "data-otf" => otf = Some((buf, mime_or(mime, "font/otf"))),
+            _ => {}
+        }
+    }
+
+    // Validate required scalar fields.
+    let team_id = team_id.unwrap_or(crate::backend::model::LOCAL_TEAM_ID);
+    let font_id = match font_id {
+        Some(u) => u,
+        None => {
+            return Ok(json_response(
+                400,
+                &serde_json::json!({"hint": "missing :font-id"}),
+            ));
+        }
+    };
+    let font_family = font_family.unwrap_or_else(|| "Untitled".into());
+    let font_weight = font_weight.unwrap_or(400);
+    let font_style = font_style.unwrap_or_else(|| "normal".into());
+
+    if woff1.is_none() && woff2.is_none() && ttf.is_none() && otf.is_none() {
+        return Ok(json_response(
+            400,
+            &serde_json::json!({"hint": "no font format payloads provided"}),
+        ));
+    }
+
+    // Persist each format under a fresh storage-object UUID. If a
+    // single format fails to write we still publish the variant with
+    // the others — the frontend negotiates by browser support, so any
+    // file works as a fallback.
+    let store_format = |bytes_mime: Option<(Vec<u8>, String)>| -> Option<uuid::Uuid> {
+        let (bytes, mime) = bytes_mime?;
+        match store.store_media(&bytes, &mime, None) {
+            Ok(s) => Some(s.id),
+            Err(e) => {
+                eprintln!("[font-upload] store_media failed: {e}");
+                None
+            }
+        }
+    };
+    let woff1_id = store_format(woff1);
+    let woff2_id = store_format(woff2);
+    let ttf_id = store_format(ttf);
+    let otf_id = store_format(otf);
+
+    let variant = match store.create_font_variant(CreateFontVariantRequest {
+        id: None,
+        team_id,
+        font_id,
+        font_family: &font_family,
+        font_weight,
+        font_style: &font_style,
+        woff1_file_id: woff1_id,
+        woff2_file_id: woff2_id,
+        ttf_file_id: ttf_id,
+        otf_file_id: otf_id,
+    }) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(json_response(
+                500,
+                &serde_json::json!({"hint": format!("create_font_variant failed: {e}")}),
+            ));
+        }
+    };
+
+    Ok(json_response(200, &font_variant_payload(&variant)))
+}
+
+fn mime_or(mime: String, fallback: &str) -> String {
+    if mime.is_empty() {
+        fallback.to_string()
+    } else {
+        mime
+    }
+}
+
+fn font_variant_payload(v: &crate::backend::model::FontVariant) -> serde_json::Value {
+    serde_json::json!({
+        "id": v.id,
+        "teamId": v.team_id,
+        "fontId": v.font_id,
+        "fontFamily": v.font_family,
+        "fontWeight": v.font_weight,
+        "fontStyle": v.font_style,
+        "woff1FileId": v.woff1_file_id,
+        "woff2FileId": v.woff2_file_id,
+        "ttfFileId": v.ttf_file_id,
+        "otfFileId": v.otf_file_id,
+        "createdAt": v.created_at,
+    })
 }
 
 /// Serve a stored media blob by storage-object id.
