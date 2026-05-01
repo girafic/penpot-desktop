@@ -25,7 +25,7 @@ use super::changes::apply_changes;
 use super::db;
 use super::media::{self, StoreMediaRequest, StoredMedia};
 use super::model::{
-    self, File, Project, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
+    self, File, Project, Snapshot, Team, FILE_DATA_VERSION, LOCAL_PROJECT_ID, LOCAL_TEAM_ID,
 };
 
 /// Auto-snapshot every Nth revn — matches Penpot's
@@ -621,6 +621,189 @@ impl Store {
             self.read_media(id)
         }
     }
+
+    // ──────────────── Snapshots ────────────────
+
+    /// Take a manual snapshot of the file at its current revn. Returns
+    /// the new snapshot row. Pass `Some("auto")` to log it as an
+    /// auto-snapshot (for tests / replay); production auto-snapshots
+    /// are written from inside [`Self::apply_update`] for atomicity.
+    pub fn take_snapshot(&self, file_id: Uuid, label: Option<String>) -> Result<Snapshot> {
+        let file = self
+            .get_file(file_id)
+            .ok_or_else(|| anyhow::anyhow!("file {file_id} not found"))?;
+        let snapshot = Snapshot {
+            id: Uuid::new_v4(),
+            file_id,
+            revn: file.revn,
+            label: label.clone(),
+            created_at: Utc::now(),
+        };
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let mut st = state.write().unwrap();
+                st.snapshots.entry(file_id).or_default().push(MemorySnapshot {
+                    meta: snapshot.clone(),
+                    data: file.data.clone(),
+                });
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                let (blob, fmt) = db::encode_data(&file.data)?;
+                conn.execute(
+                    "INSERT INTO file_snapshots \
+                     (id, file_id, revn, label, data, data_format, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        snapshot.id.as_bytes(),
+                        file_id.as_bytes(),
+                        snapshot.revn,
+                        snapshot.label,
+                        blob,
+                        fmt,
+                        snapshot.created_at.timestamp_millis(),
+                    ],
+                )?;
+            }
+        }
+        Ok(snapshot)
+    }
+
+    /// List snapshots for a file, newest first. Both manual and auto
+    /// rows are returned — callers filter via `Snapshot::is_auto`.
+    pub fn list_snapshots(&self, file_id: Uuid) -> Vec<Snapshot> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let st = state.read().unwrap();
+                let mut snaps: Vec<Snapshot> = st
+                    .snapshots
+                    .get(&file_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|s| s.meta.clone())
+                    .collect();
+                snaps.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                snaps
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                conn.prepare(
+                    "SELECT id, file_id, revn, label, created_at \
+                     FROM file_snapshots WHERE file_id = ?1 \
+                     ORDER BY created_at DESC",
+                )
+                .ok()
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![file_id.as_bytes()], row_to_snapshot)
+                        .ok()
+                        .map(|it| it.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Restore a file's data tree from a snapshot. Bumps revn so any
+    /// connected client picks up the change on next `get-file`.
+    /// Returns the new revn on success.
+    pub fn restore_snapshot(&self, file_id: Uuid, snapshot_id: Uuid) -> Result<i64> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let mut st = state.write().unwrap();
+                let snapshot = st
+                    .snapshots
+                    .get(&file_id)
+                    .and_then(|list| list.iter().find(|s| s.meta.id == snapshot_id).cloned())
+                    .ok_or_else(|| anyhow::anyhow!("snapshot {snapshot_id} not found"))?;
+                let file = st
+                    .files
+                    .get_mut(&file_id)
+                    .ok_or_else(|| anyhow::anyhow!("file {file_id} not found"))?;
+                file.data = snapshot.data;
+                file.revn += 1;
+                file.modified_at = Utc::now();
+                Ok(file.revn)
+            }
+            Backend::Sqlite(conn) => {
+                let mut conn = conn.lock().unwrap();
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let (blob, fmt): (Vec<u8>, String) = tx
+                    .query_row(
+                        "SELECT data, data_format FROM file_snapshots \
+                         WHERE id = ?1 AND file_id = ?2",
+                        params![snapshot_id.as_bytes(), file_id.as_bytes()],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?
+                    .ok_or_else(|| anyhow::anyhow!("snapshot {snapshot_id} not found"))?;
+                let data = db::decode_data(&blob, &fmt)?;
+
+                let row = tx
+                    .query_row(
+                        file_select_sql_with_filter("id = ?1 AND deleted_at IS NULL"),
+                        params![file_id.as_bytes()],
+                        row_to_file,
+                    )
+                    .optional()?;
+                let mut file = row.ok_or_else(|| anyhow::anyhow!("file {file_id} not found"))?;
+                file.data = data;
+                file.revn += 1;
+                file.modified_at = Utc::now();
+                let new_revn = file.revn;
+                upsert_file(&tx, &file)?;
+                tx.commit()?;
+                Ok(new_revn)
+            }
+        }
+    }
+
+    /// Update a snapshot's label (typically from "auto" → user title).
+    pub fn rename_snapshot(&self, snapshot_id: Uuid, label: Option<String>) -> Result<()> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let mut st = state.write().unwrap();
+                for list in st.snapshots.values_mut() {
+                    if let Some(snap) = list.iter_mut().find(|s| s.meta.id == snapshot_id) {
+                        snap.meta.label = label;
+                        return Ok(());
+                    }
+                }
+                Err(anyhow::anyhow!("snapshot {snapshot_id} not found"))
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                let n = conn.execute(
+                    "UPDATE file_snapshots SET label = ?1 WHERE id = ?2",
+                    params![label, snapshot_id.as_bytes()],
+                )?;
+                if n == 0 {
+                    return Err(anyhow::anyhow!("snapshot {snapshot_id} not found"));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Delete a snapshot. No-op if it doesn't exist.
+    pub fn delete_snapshot(&self, snapshot_id: Uuid) -> Result<()> {
+        match &*self.backend {
+            Backend::Memory(state) => {
+                let mut st = state.write().unwrap();
+                for list in st.snapshots.values_mut() {
+                    list.retain(|s| s.meta.id != snapshot_id);
+                }
+                Ok(())
+            }
+            Backend::Sqlite(conn) => {
+                let conn = conn.lock().unwrap();
+                conn.execute(
+                    "DELETE FROM file_snapshots WHERE id = ?1",
+                    params![snapshot_id.as_bytes()],
+                )?;
+                Ok(())
+            }
+        }
+    }
 }
 
 impl Default for Store {
@@ -641,6 +824,14 @@ struct MemoryState {
     /// stored separately since the in-memory backend re-probes on read
     /// when needed (rare; tests only).
     media: HashMap<Uuid, (String, Vec<u8>)>,
+    /// Per-file snapshots: file_id → (snapshot, encoded data).
+    snapshots: HashMap<Uuid, Vec<MemorySnapshot>>,
+}
+
+#[derive(Clone)]
+struct MemorySnapshot {
+    meta: Snapshot,
+    data: Value,
 }
 
 impl MemoryState {
@@ -930,6 +1121,16 @@ fn row_to_file(row: &Row<'_>) -> rusqlite::Result<File> {
     })
 }
 
+fn row_to_snapshot(row: &Row<'_>) -> rusqlite::Result<Snapshot> {
+    Ok(Snapshot {
+        id: row_uuid(row, 0)?,
+        file_id: row_uuid(row, 1)?,
+        revn: row.get(2)?,
+        label: row.get::<_, Option<String>>(3)?,
+        created_at: ts_to_dt(row.get::<_, i64>(4)?),
+    })
+}
+
 fn row_to_change_record(row: &Row<'_>) -> rusqlite::Result<ChangeRecord> {
     let changes_blob: Vec<u8> = row.get(2)?;
     let undo_blob: Vec<u8> = row.get(3).unwrap_or_default();
@@ -1201,5 +1402,97 @@ mod tests {
         assert_eq!(provider(&id.to_string()).as_deref(), Some(b"X".as_ref()));
         assert!(provider("not-a-uuid").is_none());
         assert!(provider(&Uuid::new_v4().to_string()).is_none());
+    }
+
+    // ─────── Snapshots ───────
+
+    #[test]
+    fn sqlite_take_and_list_snapshots() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let f = fresh_file(LOCAL_PROJECT_ID);
+        let id = f.id;
+        s.put_file(f);
+        let snap = s.take_snapshot(id, Some("v1.0".into())).unwrap();
+        let list = s.list_snapshots(id);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, snap.id);
+        assert_eq!(list[0].label.as_deref(), Some("v1.0"));
+        assert!(!list[0].is_auto());
+    }
+
+    #[test]
+    fn sqlite_restore_snapshot_resets_data_and_bumps_revn() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let f = fresh_file(LOCAL_PROJECT_ID);
+        let id = f.id;
+        let page_id = first_page_id(&f);
+        s.put_file(f);
+
+        // Take snapshot at revn=0.
+        let snap = s.take_snapshot(id, Some("baseline".into())).unwrap();
+        assert_eq!(snap.revn, 0);
+
+        // Mutate the file (revn=1).
+        let obj_id = Uuid::new_v4().to_string();
+        let _ = s.apply_update(UpdateRequest {
+            file_id: id,
+            client_revn: 0,
+            session_id: Uuid::new_v4(),
+            changes: vec![json!({
+                "type": "add-obj",
+                "id": obj_id,
+                "pageId": page_id,
+                "parentId": Uuid::nil().to_string(),
+                "obj": {"id": obj_id, "type": "rect"}
+            })],
+        });
+        let after_update = s.get_file(id).unwrap();
+        assert_eq!(after_update.revn, 1);
+        let objects_after = after_update
+            .data
+            .pointer(&format!("/pagesIndex/{page_id}/objects"))
+            .and_then(Value::as_object)
+            .unwrap();
+        assert!(objects_after.contains_key(&obj_id));
+
+        // Restore baseline → object should be gone, revn bumped to 2.
+        let new_revn = s.restore_snapshot(id, snap.id).unwrap();
+        assert_eq!(new_revn, 2);
+        let restored = s.get_file(id).unwrap();
+        assert_eq!(restored.revn, 2);
+        let objects_restored = restored
+            .data
+            .pointer(&format!("/pagesIndex/{page_id}/objects"))
+            .and_then(Value::as_object)
+            .unwrap();
+        assert!(!objects_restored.contains_key(&obj_id));
+    }
+
+    #[test]
+    fn sqlite_rename_and_delete_snapshot() {
+        let s = Store::in_memory_sqlite().unwrap();
+        let f = fresh_file(LOCAL_PROJECT_ID);
+        let id = f.id;
+        s.put_file(f);
+        let snap = s.take_snapshot(id, None).unwrap();
+        s.rename_snapshot(snap.id, Some("Renamed".into())).unwrap();
+        assert_eq!(
+            s.list_snapshots(id)[0].label.as_deref(),
+            Some("Renamed")
+        );
+        s.delete_snapshot(snap.id).unwrap();
+        assert_eq!(s.list_snapshots(id).len(), 0);
+    }
+
+    #[test]
+    fn memory_snapshot_round_trip() {
+        let s = Store::in_memory();
+        let f = fresh_file(LOCAL_PROJECT_ID);
+        let id = f.id;
+        s.put_file(f);
+        let snap = s.take_snapshot(id, Some("v1".into())).unwrap();
+        let listed = s.list_snapshots(id);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, snap.id);
     }
 }

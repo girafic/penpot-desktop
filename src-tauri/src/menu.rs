@@ -741,20 +741,23 @@ pub fn build_menu(
             ))
             .separator();
         if !is_offline {
-            // Online-only items: shared library + pin-version + version
-            // history all rely on backend RPC paths the offline backend
-            // doesn't fully implement yet (Phase 4 on the roadmap).
+            // Online-only: shared libraries depend on cross-team
+            // visibility, which the single-user offline mode doesn't
+            // model.
             file_builder = file_builder
                 .item(&mi!(app, "toggle-shared", t("file.add-shared")))
-                .separator()
-                .item(&mi!(app, "pin-version", t("file.pin-version")))
-                .item(&mi!(
-                    app,
-                    "show-version-history",
-                    d("file.version-history", "Cmd+Alt+H")
-                ))
                 .separator();
         }
+        // Version history is wired in both modes: Phase 4 ships the
+        // snapshot RPCs against the embedded backend.
+        file_builder = file_builder
+            .item(&mi!(app, "pin-version", t("file.pin-version")))
+            .item(&mi!(
+                app,
+                "show-version-history",
+                d("file.version-history", "Cmd+Alt+H")
+            ))
+            .separator();
         let file_submenu = file_builder
             .item(&mi!(app, "export", t("file.export"), "CmdOrCtrl+Shift+E"))
             .item(&mi!(app, "download-binary", t("file.download-binary")))

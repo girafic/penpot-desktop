@@ -113,6 +113,13 @@ impl Backend {
             "update-file" => self.update_file(body)?,
             "persist-temp-file" => self.update_file(body)?,
 
+            // ── Snapshots / version history
+            "get-file-snapshots" => self.get_file_snapshots(body),
+            "take-file-snapshot" => self.take_file_snapshot(body)?,
+            "restore-file-snapshot" => self.restore_file_snapshot(body)?,
+            "update-file-snapshot" => self.update_file_snapshot(body)?,
+            "remove-file-snapshot" => self.remove_file_snapshot(body)?,
+
             // ── Comments / fonts / plugins / templates
             "get-comment-threads" | "get-unread-comment-threads" => RpcResponse::ok(json!([])),
             "get-comments" => RpcResponse::ok(json!([])),
@@ -448,6 +455,96 @@ impl Backend {
             }),
         }
     }
+
+    // ──────────────── Snapshots / version history ────────────────
+
+    fn get_file_snapshots(&self, body: &Value) -> RpcResponse {
+        let file_id = match body.get("fileId").and_then(parse_uuid_field) {
+            Some(u) => u,
+            None => return RpcResponse::ok(json!([])),
+        };
+        let snapshots = self.store.list_snapshots(file_id);
+        let payload: Vec<Value> = snapshots.iter().map(snapshot_payload).collect();
+        RpcResponse::ok(Value::Array(payload))
+    }
+
+    fn take_file_snapshot(&self, body: &Value) -> Result<RpcResponse> {
+        let file_id = body
+            .get("fileId")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :file-id"))?;
+        let label = body
+            .get("label")
+            .and_then(Value::as_str)
+            .map(String::from);
+        match self.store.take_snapshot(file_id, label) {
+            Ok(s) => Ok(RpcResponse::ok(snapshot_payload(&s))),
+            Err(e) => Ok(RpcResponse::Error {
+                status: 400,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    fn restore_file_snapshot(&self, body: &Value) -> Result<RpcResponse> {
+        let file_id = body
+            .get("fileId")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :file-id"))?;
+        let snapshot_id = body
+            .get("id")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :id"))?;
+        match self.store.restore_snapshot(file_id, snapshot_id) {
+            Ok(new_revn) => Ok(RpcResponse::ok(json!({
+                "fileId": file_id,
+                "id": snapshot_id,
+                "revn": new_revn,
+            }))),
+            Err(e) => Ok(RpcResponse::Error {
+                status: 400,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    fn update_file_snapshot(&self, body: &Value) -> Result<RpcResponse> {
+        let snapshot_id = body
+            .get("id")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :id"))?;
+        let label = body
+            .get("label")
+            .and_then(Value::as_str)
+            .map(String::from);
+        match self.store.rename_snapshot(snapshot_id, label) {
+            Ok(()) => Ok(RpcResponse::ok(json!({"id": snapshot_id}))),
+            Err(e) => Ok(RpcResponse::Error {
+                status: 404,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    fn remove_file_snapshot(&self, body: &Value) -> Result<RpcResponse> {
+        let snapshot_id = body
+            .get("id")
+            .and_then(parse_uuid_field)
+            .ok_or_else(|| anyhow::anyhow!("missing :id"))?;
+        self.store.delete_snapshot(snapshot_id).ok();
+        Ok(RpcResponse::ok(json!({"id": snapshot_id})))
+    }
+}
+
+fn snapshot_payload(s: &model::Snapshot) -> Value {
+    json!({
+        "id": s.id,
+        "fileId": s.file_id,
+        "revn": s.revn,
+        "label": s.label,
+        "createdAt": s.created_at,
+        "isAuto": s.is_auto(),
+    })
 }
 
 /// Parse a UUID from a JSON value that may be either a plain string or a
@@ -607,6 +704,54 @@ mod tests {
         match resp {
             RpcResponse::Json(Value::Null) => {}
             other => panic!("expected null JSON, got {:?}", debug_resp(&other)),
+        }
+    }
+
+    #[test]
+    fn snapshot_take_list_restore_via_rpc() {
+        let b = fresh_backend();
+        let id = Uuid::new_v4();
+        let _ = b.dispatch(
+            RpcKind::Command,
+            "create-file",
+            &json!({"id": id.to_string(), "name": "F"}),
+        );
+        let take = b.dispatch(
+            RpcKind::Command,
+            "take-file-snapshot",
+            &json!({"fileId": id.to_string(), "label": "v1"}),
+        );
+        let snap = match take {
+            RpcResponse::Json(v) => v,
+            _ => panic!("take-file-snapshot failed"),
+        };
+        let snap_id = snap.get("id").and_then(Value::as_str).unwrap().to_string();
+        assert_eq!(snap.get("label").and_then(Value::as_str), Some("v1"));
+
+        let listed = b.dispatch(
+            RpcKind::Command,
+            "get-file-snapshots",
+            &json!({"fileId": id.to_string()}),
+        );
+        let arr = match listed {
+            RpcResponse::Json(Value::Array(a)) => a,
+            _ => panic!("get-file-snapshots failed"),
+        };
+        assert_eq!(arr.len(), 1);
+
+        let restored = b.dispatch(
+            RpcKind::Command,
+            "restore-file-snapshot",
+            &json!({"fileId": id.to_string(), "id": snap_id}),
+        );
+        match restored {
+            RpcResponse::Json(v) => {
+                // Restoring a freshly-taken snapshot only bumps revn — no
+                // data changes — but the response should still echo the
+                // new revn so the editor reloads.
+                assert_eq!(v.get("revn").and_then(Value::as_i64), Some(1));
+            }
+            _ => panic!("restore-file-snapshot failed"),
         }
     }
 

@@ -19,6 +19,31 @@ pub const ROOT_FRAME_ID: Uuid = Uuid::nil();
 /// time (TODO Phase 6); newer files we refuse with a clear error.
 pub const FILE_DATA_VERSION: u32 = 64;
 
+// ───────────────────────── Snapshot ─────────────────────────
+
+/// Versioned capture of `file.data` at a specific `revn`. Surfaced
+/// through Penpot's "Version History" sidebar; manual ones are created
+/// via `take-file-snapshot` (or the File-menu "Pin Version" item),
+/// auto ones come from the Phase-2 every-N-revns logic.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Snapshot {
+    pub id: Uuid,
+    pub file_id: Uuid,
+    pub revn: i64,
+    /// `Some("auto")` for the auto-snapshot path; user-supplied string
+    /// for "Pin Version"; `None` is permitted but discouraged — most
+    /// UIs treat label-less rows as untitled drafts.
+    pub label: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Snapshot {
+    pub fn is_auto(&self) -> bool {
+        matches!(self.label.as_deref(), Some("auto"))
+    }
+}
+
 // ───────────────────────── Team / Project / File ─────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
