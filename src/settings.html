@@ -387,6 +387,44 @@
       </div>
 
       <div class="card">
+        <label data-i18n="s.mode">Mode</label>
+        <div class="toggle-row">
+          <div class="toggle-option" id="mode-online" onclick="setMode('online')">
+            <span class="toggle-radio"></span>
+            <div>
+              <strong data-i18n="s.mode-online">Online</strong>
+              <span class="toggle-desc" data-i18n="s.mode-online-desc"
+                >Connect to a remote Penpot instance.</span
+              >
+            </div>
+          </div>
+          <div class="toggle-option" id="mode-offline" onclick="setMode('offline')">
+            <span class="toggle-radio"></span>
+            <div>
+              <strong data-i18n="s.mode-offline">Offline</strong>
+              <span class="toggle-desc" data-i18n="s.mode-offline-desc"
+                >Run a single-user Penpot workspace locally. No backend required.</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="offlineCard" style="display: none">
+        <label data-i18n="s.offline-files">Offline Files</label>
+        <div id="offlineList" style="margin-top: 8px"></div>
+        <div style="margin-top: 14px; display: flex; gap: 10px">
+          <button class="btn btn-primary" onclick="openOfflineFile()" data-i18n="s.offline-open-button">
+            Open .penpot File…
+          </button>
+          <button class="btn" onclick="launchOffline()" data-i18n="s.offline-launch">
+            Open Workspace
+          </button>
+        </div>
+        <div id="offlineStatus" class="status" style="margin-top: 12px"></div>
+      </div>
+
+      <div class="card" id="onlineCard">
         <label data-i18n="s.backend-url">Penpot Backend URL</label>
         <div class="input-row">
           <input
@@ -505,8 +543,13 @@
       const statusEl = document.getElementById("status");
       const recentCard = document.getElementById("recentCard");
       const recentList = document.getElementById("recentList");
+      const offlineCard = document.getElementById("offlineCard");
+      const onlineCard = document.getElementById("onlineCard");
+      const offlineList = document.getElementById("offlineList");
+      const offlineStatus = document.getElementById("offlineStatus");
       let currentRenderer = "classic";
       let currentLang = "en";
+      let currentMode = "online";
 
       // Available languages
       const LANGUAGES = {
@@ -580,15 +623,164 @@
           .classList.toggle("active", r !== "wasm");
       }
 
+      function applyModeUi() {
+        const isOffline = currentMode === "offline";
+        document
+          .getElementById("mode-online")
+          .classList.toggle("active", !isOffline);
+        document
+          .getElementById("mode-offline")
+          .classList.toggle("active", isOffline);
+        offlineCard.style.display = isOffline ? "block" : "none";
+        onlineCard.style.display = isOffline ? "none" : "block";
+        if (recentCard) {
+          recentCard.style.display = isOffline ? "none" : recentCard.style.display;
+        }
+      }
+
+      async function setMode(mode) {
+        currentMode = mode;
+        applyModeUi();
+        try {
+          await fetch("/__penpot_desktop/set-mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode }),
+          });
+        } catch (e) {
+          console.error("[penpot-desktop] set-mode failed", e);
+        }
+        if (mode === "offline") {
+          loadOfflineFiles();
+        }
+      }
+
+      async function loadOfflineFiles() {
+        try {
+          const resp = await fetch("/__penpot_desktop/offline-files");
+          const data = await resp.json();
+          renderOfflineList(data.files || []);
+        } catch (e) {
+          console.error("[penpot-desktop] offline-files failed", e);
+        }
+      }
+
+      function renderOfflineList(files) {
+        if (!files.length) {
+          offlineList.innerHTML =
+            '<div style="color: var(--text-dim); font-size: 13px; padding: 8px 0">' +
+            (_translations["s.offline-no-files"] ||
+              "No offline files yet — open a .penpot archive to get started.") +
+            "</div>";
+          return;
+        }
+        offlineList.innerHTML = files
+          .map(function (f) {
+            const safeName = (f.name || "Untitled")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            const url =
+              "/#/workspace?team-id=" +
+              encodeURIComponent(f.teamId) +
+              "&file-id=" +
+              encodeURIComponent(f.id) +
+              "&page-id=" +
+              encodeURIComponent(f.firstPageId || "");
+            return (
+              '<div class="recent-item" onclick="window.location.href=\'' +
+              url +
+              "'\">" +
+              '<span class="dot"></span>' +
+              '<span class="url">' +
+              safeName +
+              "</span></div>"
+            );
+          })
+          .join("");
+      }
+
+      async function openOfflineFile() {
+        // Spawn the native file picker via Tauri's dialog plugin, then
+        // pass the path to `open_penpot_file` — the Rust side reads the
+        // bytes itself (no `fs` capability needed here).
+        try {
+          const dialog = (window.__TAURI__ && window.__TAURI__.dialog) || {};
+          const core = (window.__TAURI__ && window.__TAURI__.core) || {};
+          if (!dialog.open || !core.invoke) {
+            offlineStatus.className = "status error";
+            offlineStatus.textContent =
+              _translations["s.offline-import-error"] ||
+              "Could not import file.";
+            return;
+          }
+          const path = await dialog.open({
+            multiple: false,
+            filters: [{ name: "Penpot Archive", extensions: ["penpot"] }],
+          });
+          if (!path) return;
+          const ids = await core.invoke("open_penpot_file", { path });
+          if (ids && ids.length) {
+            await loadOfflineFiles();
+            const fileId = ids[0];
+            const teamId = "00000000-0000-0000-0000-000100000000";
+            // Pull the page-id from the just-refreshed listing.
+            const resp = await fetch("/__penpot_desktop/offline-files");
+            const data = await resp.json();
+            const found = (data.files || []).find(function (f) {
+              return f.id === fileId;
+            });
+            const pageId = (found && found.firstPageId) || "";
+            window.location.href =
+              "/#/workspace?team-id=" +
+              encodeURIComponent(teamId) +
+              "&file-id=" +
+              encodeURIComponent(fileId) +
+              "&page-id=" +
+              encodeURIComponent(pageId);
+          } else {
+            offlineStatus.className = "status error";
+            offlineStatus.textContent =
+              _translations["s.offline-import-error"] ||
+              "Could not import file.";
+          }
+        } catch (e) {
+          console.error("[penpot-desktop] open offline file failed", e);
+          offlineStatus.className = "status error";
+          offlineStatus.textContent =
+            (_translations["s.offline-import-error"] ||
+              "Could not import file.") +
+            " (" +
+            (e.message || e) +
+            ")";
+        }
+      }
+
+      function launchOffline() {
+        offlineStatus.className = "status loading";
+        offlineStatus.innerHTML =
+          '<span class="spinner"></span> ' +
+          (_translations["s.offline-launching"] || "Loading workspace…");
+        const wasmParam = currentRenderer === "wasm" ? "true" : "false";
+        setTimeout(function () {
+          window.location.href = "/#/?wasm=" + wasmParam;
+        }, 400);
+      }
+
       async function init() {
         try {
           const resp = await fetch("/__penpot_desktop/config");
           const config = await resp.json();
           if (config.backend_url) urlInput.value = config.backend_url;
           currentLang = config.language || "en";
+          currentMode = config.mode === "offline" ? "offline" : "online";
           populateLanguages();
           setRenderer(config.renderer || "classic");
           renderRecent(config.recent_urls || []);
+          applyModeUi();
+          if (currentMode === "offline") {
+            loadOfflineFiles();
+          }
           await applyTranslations();
         } catch (e) {
           console.error(e);

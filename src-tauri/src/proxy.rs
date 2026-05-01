@@ -191,6 +191,82 @@ pub async fn start_proxy_with(
             }
         });
 
+    // ── POST /__penpot_desktop/set-mode → toggle online/offline mode
+    // Persists the new mode and rebuilds the menu so the File submenu
+    // surfaces the right items. The page is expected to reload itself
+    // after the call so it picks up the new initial URL.
+    let config_for_mode = config.clone();
+    let set_mode = warp::path!("__penpot_desktop" / "set-mode")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| {
+            let cfg = config_for_mode.clone();
+            async move {
+                let mode_str = body.get("mode").and_then(|v| v.as_str()).unwrap_or("online");
+                let new_mode = match mode_str {
+                    "offline" => AppMode::Offline,
+                    _ => AppMode::Online,
+                };
+                {
+                    let mut c = cfg.write().await;
+                    c.mode = new_mode;
+                    save_config(&c);
+                }
+                // Rebuild menu to reflect mode-dependent File submenu items.
+                if let Some(app) = APP_HANDLE.get() {
+                    let mode = focused_window_mode(app);
+                    if let Ok((menu, _)) = build_menu(app, &mode) {
+                        let _ = app.set_menu(menu);
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = app.run_on_main_thread(|| {
+                                register_help_menu();
+                                register_window_menu();
+                            });
+                        }
+                    }
+                }
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+            }
+        });
+
+    // ── GET /__penpot_desktop/offline-files → list files in the offline store
+    let backend_store_for_files = backend_store.clone();
+    let offline_files = warp::path!("__penpot_desktop" / "offline-files")
+        .and(warp::get())
+        .and_then(move || {
+            let store = backend_store_for_files.clone();
+            async move {
+                let files: Vec<serde_json::Value> = store
+                    .list_project_files(crate::backend::model::LOCAL_PROJECT_ID)
+                    .into_iter()
+                    .map(|f| {
+                        let pages = f
+                            .data
+                            .get("pages")
+                            .and_then(|v| v.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        let first_page = pages
+                            .first()
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        serde_json::json!({
+                            "id": f.id,
+                            "projectId": f.project_id,
+                            "teamId": crate::backend::model::LOCAL_TEAM_ID,
+                            "name": f.name,
+                            "revn": f.revn,
+                            "modifiedAt": f.modified_at,
+                            "firstPageId": first_page,
+                        })
+                    })
+                    .collect();
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"files": files})))
+            }
+        });
+
     // ── POST /__penpot_desktop/set-language → change language and rebuild menus
     let config_for_lang = config.clone();
     let set_language = warp::path!("__penpot_desktop" / "set-language")
@@ -469,6 +545,17 @@ pub async fn start_proxy_with(
                     "settings.cloud",
                     "settings.local",
                     "settings.dev",
+                    "settings.mode",
+                    "settings.mode-online",
+                    "settings.mode-online-desc",
+                    "settings.mode-offline",
+                    "settings.mode-offline-desc",
+                    "settings.offline-files",
+                    "settings.offline-no-files",
+                    "settings.offline-open-button",
+                    "settings.offline-launch",
+                    "settings.offline-import-error",
+                    "settings.offline-launching",
                 ];
                 let mut map = serde_json::Map::new();
                 map.insert("lang".into(), serde_json::Value::String(lang.clone()));
@@ -1029,6 +1116,8 @@ pub async fn start_proxy_with(
     // intercept `/api/rpc/...` and `/ws/...` when running in offline mode.
     let routes = get_config
         .or(set_backend)
+        .or(set_mode)
+        .or(offline_files)
         .or(set_view)
         .or(window_focused)
         .or(set_selection)

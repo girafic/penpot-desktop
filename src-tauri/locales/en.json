@@ -25,7 +25,13 @@
     "copy-url": "Copy File URL",
     "open-url": "Open File URL from Clipboard",
     "invalid-url-title": "Invalid Penpot URL",
-    "invalid-url-body": "The clipboard does not contain a valid Penpot URL."
+    "invalid-url-body": "The clipboard does not contain a valid Penpot URL.",
+    "offline-open": "Open .penpot File...",
+    "offline-save-as": "Save .penpot File As...",
+    "offline-import-failed-title": "Import Failed",
+    "offline-import-failed-body": "Could not read the .penpot archive. The file may be corrupted or use an unsupported format.",
+    "offline-export-failed-title": "Save Failed",
+    "offline-export-failed-body": "Could not write the .penpot archive."
   },
   "edit": {
     "edit": "Edit",
@@ -163,6 +169,17 @@
     "local": "Local",
     "dev": "Dev",
     "restart-prompt": "Restart the app to fully apply the new language?",
-    "restart-later": "Later"
+    "restart-later": "Later",
+    "mode": "Mode",
+    "mode-online": "Online",
+    "mode-online-desc": "Connect to a remote Penpot instance.",
+    "mode-offline": "Offline",
+    "mode-offline-desc": "Run a single-user Penpot workspace locally. No backend required.",
+    "offline-files": "Offline Files",
+    "offline-no-files": "No offline files yet — open a .penpot archive to get started.",
+    "offline-open-button": "Open .penpot File…",
+    "offline-launch": "Open Workspace",
+    "offline-import-error": "Could not import the file. Only binfile-v3 .penpot archives are supported.",
+    "offline-launching": "Loading workspace…"
   }
 }

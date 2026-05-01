@@ -25,7 +25,13 @@
     "copy-url": "Datei-URL kopieren",
     "open-url": "Datei-URL aus der Zwischenablage öffnen",
     "invalid-url-title": "Ungültige Penpot-URL",
-    "invalid-url-body": "Die Zwischenablage enthält keine gültige Penpot-URL."
+    "invalid-url-body": "Die Zwischenablage enthält keine gültige Penpot-URL.",
+    "offline-open": ".penpot-Datei öffnen…",
+    "offline-save-as": ".penpot-Datei speichern unter…",
+    "offline-import-failed-title": "Import fehlgeschlagen",
+    "offline-import-failed-body": "Das .penpot-Archiv konnte nicht gelesen werden. Möglicherweise ist die Datei beschädigt oder das Format wird nicht unterstützt.",
+    "offline-export-failed-title": "Speichern fehlgeschlagen",
+    "offline-export-failed-body": "Das .penpot-Archiv konnte nicht geschrieben werden."
   },
   "edit": {
     "edit": "Bearbeiten",
@@ -163,6 +169,17 @@
     "local": "Lokal",
     "dev": "Entwicklung",
     "restart-prompt": "App neu starten, um die neue Sprache vollständig zu übernehmen?",
-    "restart-later": "Später"
+    "restart-later": "Später",
+    "mode": "Modus",
+    "mode-online": "Online",
+    "mode-online-desc": "Mit einer entfernten Penpot-Instanz verbinden.",
+    "mode-offline": "Offline",
+    "mode-offline-desc": "Lokaler Single-User-Workspace. Kein Backend nötig.",
+    "offline-files": "Offline-Dateien",
+    "offline-no-files": "Noch keine Offline-Dateien — öffne ein .penpot-Archiv, um loszulegen.",
+    "offline-open-button": ".penpot-Datei öffnen…",
+    "offline-launch": "Workspace öffnen",
+    "offline-import-error": "Datei konnte nicht importiert werden. Nur binfile-v3 .penpot-Archive werden unterstützt.",
+    "offline-launching": "Workspace wird geladen…"
   }
 }

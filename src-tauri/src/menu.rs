@@ -320,12 +320,19 @@ pub fn build_menu(
     ),
     Box<dyn std::error::Error>,
 > {
-    // Get language from config
-    let lang = APP_HANDLE
+    // Get language + mode from config
+    let (lang, is_offline) = APP_HANDLE
         .get()
         .and_then(|a| a.try_state::<crate::SharedConfig>())
-        .and_then(|c| c.try_read().ok().map(|c| c.language.clone()))
-        .unwrap_or_else(|| "en".to_string());
+        .and_then(|c| {
+            c.try_read().ok().map(|c| {
+                (
+                    c.language.clone(),
+                    matches!(c.mode, crate::config::AppMode::Offline),
+                )
+            })
+        })
+        .unwrap_or_else(|| ("en".to_string(), false));
     let t = |key: &str| i18n::t(&lang, key);
     // Translated label with optional shortcut hint:
     // d("key", "Cmd+X") → "Translated\t\tCmd+X"
@@ -605,15 +612,28 @@ pub fn build_menu(
         .enabled(has_closed)
         .build(app)?;
 
-        let file_submenu = SubmenuBuilder::new(app, &t("file.file"))
+        let mut file_builder = SubmenuBuilder::new(app, &t("file.file"))
             .item(&mi!(app, "new-tab", t("window.new-tab"), "CmdOrCtrl+T"))
             .item(&mi!(
                 app,
                 "new-window",
                 t("window.new-window"),
                 "CmdOrCtrl+N"
-            ))
-            .item(&mi!(app, "open-url-from-clipboard", t("file.open-url")))
+            ));
+        if is_offline {
+            // Offline workspace boots from a `.penpot` archive — surface
+            // open/save in the dashboard's File menu next to the URL helpers.
+            file_builder = file_builder.item(&mi!(
+                app,
+                "offline-open",
+                t("file.offline-open"),
+                "CmdOrCtrl+O"
+            ));
+        } else {
+            file_builder =
+                file_builder.item(&mi!(app, "open-url-from-clipboard", t("file.open-url")));
+        }
+        let file_submenu = file_builder
             .separator()
             .item(&mi!(app, "new-project", d("file.new-project", "+")))
             .separator()
@@ -684,16 +704,34 @@ pub fn build_menu(
         .enabled(has_closed)
         .build(app)?;
 
-        let file_submenu = SubmenuBuilder::new(app, &t("file.file"))
+        let mut file_builder = SubmenuBuilder::new(app, &t("file.file"))
             .item(&mi!(app, "new-tab", t("window.new-tab"), "CmdOrCtrl+T"))
             .item(&mi!(
                 app,
                 "new-window",
                 t("window.new-window"),
                 "CmdOrCtrl+N"
-            ))
-            .item(&mi!(app, "copy-file-url", t("file.copy-url")))
-            .item(&mi!(app, "open-url-from-clipboard", t("file.open-url")))
+            ));
+        if is_offline {
+            file_builder = file_builder
+                .item(&mi!(
+                    app,
+                    "offline-open",
+                    t("file.offline-open"),
+                    "CmdOrCtrl+O"
+                ))
+                .item(&mi!(
+                    app,
+                    "offline-save-as",
+                    t("file.offline-save-as"),
+                    "CmdOrCtrl+Shift+S"
+                ));
+        } else {
+            file_builder = file_builder
+                .item(&mi!(app, "copy-file-url", t("file.copy-url")))
+                .item(&mi!(app, "open-url-from-clipboard", t("file.open-url")));
+        }
+        let mut file_builder = file_builder
             .separator()
             .item(&mi!(
                 app,
@@ -701,16 +739,23 @@ pub fn build_menu(
                 t("window.reload-tab"),
                 "CmdOrCtrl+R"
             ))
-            .separator()
-            .item(&mi!(app, "toggle-shared", t("file.add-shared")))
-            .separator()
-            .item(&mi!(app, "pin-version", t("file.pin-version")))
-            .item(&mi!(
-                app,
-                "show-version-history",
-                d("file.version-history", "Cmd+Alt+H")
-            ))
-            .separator()
+            .separator();
+        if !is_offline {
+            // Online-only items: shared library + pin-version + version
+            // history all rely on backend RPC paths the offline backend
+            // doesn't fully implement yet (Phase 4 on the roadmap).
+            file_builder = file_builder
+                .item(&mi!(app, "toggle-shared", t("file.add-shared")))
+                .separator()
+                .item(&mi!(app, "pin-version", t("file.pin-version")))
+                .item(&mi!(
+                    app,
+                    "show-version-history",
+                    d("file.version-history", "Cmd+Alt+H")
+                ))
+                .separator();
+        }
+        let file_submenu = file_builder
             .item(&mi!(app, "export", t("file.export"), "CmdOrCtrl+Shift+E"))
             .item(&mi!(app, "download-binary", t("file.download-binary")))
             .item(&mi!(app, "export-frames-pdf", t("file.export-frames-pdf")))

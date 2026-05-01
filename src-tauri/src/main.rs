@@ -269,6 +269,39 @@ pub fn run() {
                         let _ = create_tab_window(app, port_for_menu, Some("/__penpot_desktop"), None);
                         return;
                     }
+                    "offline-open" => {
+                        let app_clone = app.clone();
+                        let port = port_for_menu;
+                        let store = app
+                            .try_state::<BackendStore>()
+                            .map(|s| s.inner().clone());
+                        let lang = menu::current_lang();
+                        let focused = app
+                            .webview_windows()
+                            .into_iter()
+                            .find(|(_, w)| w.is_focused().unwrap_or(false))
+                            .map(|(l, _)| l);
+                        std::thread::spawn(move || {
+                            offline_open_dialog(&app_clone, port, store, lang, focused);
+                        });
+                        return;
+                    }
+                    "offline-save-as" => {
+                        let app_clone = app.clone();
+                        let store = app
+                            .try_state::<BackendStore>()
+                            .map(|s| s.inner().clone());
+                        let lang = menu::current_lang();
+                        let focused = app
+                            .webview_windows()
+                            .into_iter()
+                            .find(|(_, w)| w.is_focused().unwrap_or(false))
+                            .map(|(label, win)| (label, win));
+                        std::thread::spawn(move || {
+                            offline_save_as_dialog(&app_clone, store, lang, focused);
+                        });
+                        return;
+                    }
                     "new-tab" => {
                         let focused = app.webview_windows().into_iter()
                             .find(|(_, w)| w.is_focused().unwrap_or(false))
@@ -635,7 +668,17 @@ pub fn run() {
             use tauri::webview::{DownloadEvent, WebviewWindowBuilder};
 
             // Read saved window groups early so we can inject hash into main window
-            let no_backend = shared_config.try_read().map(|c| c.backend_url.is_empty()).unwrap_or(true);
+            // In offline mode the backend URL is intentionally empty — we route into
+            // `/#/` directly via the embedded backend, so don't treat it as "show
+            // the settings page first".
+            let (no_backend, is_offline) = shared_config
+                .try_read()
+                .map(|c| {
+                    let offline = matches!(c.mode, config::AppMode::Offline);
+                    let no_backend = c.backend_url.is_empty() && !offline;
+                    (no_backend, offline)
+                })
+                .unwrap_or((true, false));
             let saved_groups: Vec<Vec<String>> = if !no_backend {
                 shared_config.try_read()
                     .map(|c| c.open_groups.clone())
@@ -734,7 +777,7 @@ pub fn run() {
             } else {
                 None
             };
-            let default_hash = if !no_backend {
+            let default_hash = if !no_backend || is_offline {
                 let wasm = shared_config.try_read()
                     .map(|c| c.renderer == "wasm")
                     .unwrap_or(false);
@@ -943,6 +986,232 @@ mod tests {
     fn keeps_plus_shortcut_stable() {
         assert_eq!(normalize_shortcut_for_platform("+", false), "+");
     }
+
+    #[test]
+    fn sanitize_filename_replaces_path_chars() {
+        use super::sanitize_filename;
+        assert_eq!(sanitize_filename("My / File"), "My _ File");
+        assert_eq!(sanitize_filename("a:b*c?d"), "a_b_c_d");
+        assert_eq!(sanitize_filename(""), "Untitled");
+        assert_eq!(sanitize_filename("   "), "Untitled");
+        assert_eq!(sanitize_filename("Plain Name"), "Plain Name");
+    }
+}
+
+// ── Offline dialog helpers ──────────────────────────────────────
+//
+// Both helpers run on a worker thread because the dialog plugin's
+// blocking_pick_file()/blocking_save_file() can't be called from the
+// main event loop without deadlocking the menu callback.
+
+fn offline_open_dialog(
+    app: &tauri::AppHandle,
+    port: u16,
+    store: Option<BackendStore>,
+    lang: String,
+    focused: Option<String>,
+) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    let Some(store) = store else { return };
+    let Some(file_path) = app
+        .dialog()
+        .file()
+        .add_filter("Penpot Archive", &["penpot"])
+        .blocking_pick_file()
+    else {
+        return;
+    };
+    let path: std::path::PathBuf = match file_path.into_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[offline-open] read {} failed: {e}", path.display());
+            return;
+        }
+    };
+    let project_id = backend::model::LOCAL_PROJECT_ID;
+    let mut cursor = std::io::Cursor::new(&bytes);
+    let format = match backend::binfile::detect(&mut cursor) {
+        Ok(f) => f,
+        Err(e) => {
+            show_import_error(app, &lang, &e.to_string());
+            return;
+        }
+    };
+    if !matches!(format, backend::binfile::Format::BinfileV3) {
+        app.dialog()
+            .message(i18n::t(&lang, "file.offline-import-failed-body"))
+            .title(i18n::t(&lang, "file.offline-import-failed-title"))
+            .kind(MessageDialogKind::Warning)
+            .blocking_show();
+        return;
+    }
+    let cursor = std::io::Cursor::new(&bytes);
+    let imp = match backend::binfile::import_binfile_v3(cursor) {
+        Ok(i) => i,
+        Err(e) => {
+            show_import_error(app, &lang, &e.to_string());
+            return;
+        }
+    };
+    let mut first_id: Option<uuid::Uuid> = None;
+    for imported in imp.files {
+        let file = backend::binfile::imported_to_file(imported, project_id);
+        if first_id.is_none() {
+            first_id = Some(file.id);
+        }
+        store.put_file(file);
+    }
+    let Some(file_id) = first_id else { return };
+    // Navigate the focused window directly into the workspace for the
+    // imported file. Penpot's workspace URL takes the team/file/page
+    // triple in the hash.
+    let team_id = backend::model::LOCAL_TEAM_ID;
+    let page_id = store
+        .get_file(file_id)
+        .and_then(|f| {
+            f.data
+                .get("pages")
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_default();
+    let target = format!(
+        "/#/workspace?team-id={team_id}&file-id={file_id}&page-id={page_id}"
+    );
+    let app_for_nav = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let win = focused
+            .as_deref()
+            .and_then(|l| app_for_nav.get_webview_window(l))
+            .or_else(|| app_for_nav.get_webview_window("main"))
+            .or_else(|| app_for_nav.webview_windows().into_values().next());
+        let Some(win) = win else { return };
+        let url = format!("http://127.0.0.1:{port}{target}");
+        if win
+            .url()
+            .ok()
+            .map(|u| u.path().contains("__penpot_desktop"))
+            .unwrap_or(false)
+        {
+            // Settings page is showing — replace it with the workspace.
+            let _ = win.eval(&format!(
+                "window.location.replace('{}')",
+                url.replace('\\', "\\\\").replace('\'', "\\'")
+            ));
+        } else {
+            let _ = win.eval(&format!(
+                "window.location.hash = '{}'",
+                target.replace('\\', "\\\\").replace('\'', "\\'")
+            ));
+        }
+    });
+}
+
+fn offline_save_as_dialog(
+    app: &tauri::AppHandle,
+    store: Option<BackendStore>,
+    lang: String,
+    focused: Option<(String, tauri::WebviewWindow)>,
+) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    let Some(store) = store else { return };
+    let Some((_label, win)) = focused else { return };
+
+    // Extract the current file-id from the URL hash. The workspace URL
+    // shape is `/#/workspace?team-id=...&file-id=<uuid>&page-id=...`.
+    let url = match win.url() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let fragment = url.fragment().unwrap_or_default().to_string();
+    let file_id = fragment
+        .split(['?', '&'])
+        .find_map(|kv| kv.strip_prefix("file-id="))
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+    let Some(file_id) = file_id else { return };
+
+    let file = match store.get_file(file_id) {
+        Some(f) => f,
+        None => return,
+    };
+    let default_name = format!("{}.penpot", sanitize_filename(&file.name));
+
+    let Some(target_path) = app
+        .dialog()
+        .file()
+        .add_filter("Penpot Archive", &["penpot"])
+        .set_file_name(&default_name)
+        .blocking_save_file()
+    else {
+        return;
+    };
+    let path: std::path::PathBuf = match target_path.into_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let bytes = match backend::binfile::export_to_bytes(&file, |_| None) {
+        Ok(b) => b,
+        Err(e) => {
+            app.dialog()
+                .message(format!(
+                    "{}\n\n{}",
+                    i18n::t(&lang, "file.offline-export-failed-body"),
+                    e
+                ))
+                .title(i18n::t(&lang, "file.offline-export-failed-title"))
+                .kind(MessageDialogKind::Warning)
+                .blocking_show();
+            return;
+        }
+    };
+    if let Err(e) = std::fs::write(&path, &bytes) {
+        app.dialog()
+            .message(format!(
+                "{}\n\n{e}",
+                i18n::t(&lang, "file.offline-export-failed-body")
+            ))
+            .title(i18n::t(&lang, "file.offline-export-failed-title"))
+            .kind(MessageDialogKind::Warning)
+            .blocking_show();
+    }
+}
+
+fn show_import_error(app: &tauri::AppHandle, lang: &str, detail: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    app.dialog()
+        .message(format!(
+            "{}\n\n{detail}",
+            i18n::t(lang, "file.offline-import-failed-body")
+        ))
+        .title(i18n::t(lang, "file.offline-import-failed-title"))
+        .kind(MessageDialogKind::Warning)
+        .blocking_show();
+}
+
+/// Strip path separators and characters most filesystems reject. Keeps
+/// reasonable filenames under each platform's name rules.
+fn sanitize_filename(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    out = out.trim().to_string();
+    if out.is_empty() {
+        out = "Untitled".into();
+    }
+    out
 }
 
 fn main() {

@@ -11,6 +11,8 @@
     "shell:allow-open",
     "dialog:default",
     "dialog:allow-save",
+    "dialog:allow-open",
+    "dialog:allow-message",
     "core:app:default",
     "core:menu:default",
     "core:menu:allow-set-as-help-menu-for-nsapp",
